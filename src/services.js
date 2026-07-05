@@ -52,14 +52,14 @@ const Sound = {
  * ===================================================================== */
 const Music = {
   src: "assets/audio/above-the-sprawl.mp3",
-  playing: false, enabled: true, volume: 0.8, track: null,
+  playing: false, enabled: true, volume: 0.8, gain: 0.55, track: null,
   init() {
     if (this.track || typeof Audio === "undefined") return;
     this.track = new Audio(this.src);
     this.track.loop = true; this.track.preload = "auto";
     this.applyVolume();
   },
-  applyVolume() { if (this.track) this.track.volume = this.enabled ? clamp(this.volume, 0, 1) : 0; },
+  applyVolume() { if (this.track) this.track.volume = this.enabled ? clamp(this.volume * this.gain, 0, 1) : 0; },
   play() { this.playing = true; this.init(); this.applyVolume(); this.resume(); },
   stop() { this.playing = false; if (this.track) this.track.pause(); },
   resume() {

@@ -6,7 +6,7 @@
 
 | File | Source URL | Author | License | Notes |
 | --- | --- | --- | --- | --- |
-| `assets/audio/above-the-sprawl.mp3` | User-provided local file: `C:/Users/liu_j/Downloads/Above_the_Sprawl.mp3` | Unknown | User-provided; confirm before public release | Main menu and gameplay BGM |
+| `assets/audio/above-the-sprawl.mp3` | User-provided local file: `C:/Users/liu_j/Downloads/Above_the_Sprawl.mp3` | Unknown | User-provided; confirm before public release | Main menu and gameplay BGM; trimmed about 2s from start and end |
 
 推荐优先级:
 
