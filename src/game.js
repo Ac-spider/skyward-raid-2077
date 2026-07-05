@@ -510,7 +510,11 @@ const game = {
     const b = CONFIG.bonuses.adrenaline, p = this.player;
     return b && p && p.maxHp && p.hp / p.maxHp <= b.threshold ? this.bonusStacks("adrenaline") * (b[prop] || 0) : 0;
   },
-  mainBulletDamage() { return CONFIG.bullet.damage + this.bonusValue("kineticAmmo", "bulletDamage") + this.bonusValue("heavyRounds", "bulletDamage") + this.routeBonus("主炮", 1); },
+  mainBulletDamage(target = null) {
+    let d = CONFIG.bullet.damage + this.bonusValue("kineticAmmo", "bulletDamage") + this.bonusValue("heavyRounds", "bulletDamage") + this.routeBonus("主炮", 1);
+    if (target && target.maxHp >= (CONFIG.bonuses.armorPiercer.minHp || 12)) d *= 1 + this.bonusValue("armorPiercer", "heavyDamageMult");
+    return d;
+  },
   playerDamage(d, target = null) {
     let m = 1 + this.bonusValue("damage", "damageMult") + this.bonusValue("glassCannon", "damageMult") + this.adrenalineValue("damageMult");
     if (target && target.isBoss) m += this.bonusValue("bossHunter", "bossDamageMult");
@@ -560,7 +564,7 @@ const game = {
   },
   buildRouteSummary(source = this.bonuses) {
     const routes = [
-      { name: "主炮", color: "#ffd43b", weights: { damage: 1, fireRate: 1, pierce: 2, kineticAmmo: 2, heavyRounds: 3, sideCannons: 3, chainSpark: 1, pointDefense: 1, executioner: 1, glassCannon: 1, overdrive: 1 } },
+      { name: "主炮", color: "#ffd43b", weights: { damage: 1, fireRate: 1, pierce: 2, kineticAmmo: 2, heavyRounds: 3, armorPiercer: 3, sideCannons: 3, chainSpark: 1, pointDefense: 1, executioner: 1, glassCannon: 1, overdrive: 1 } },
       { name: "激光", color: "#cc5de8", weights: { damage: 1, range: 1, laserLens: 3, laserSplitter: 3, chargeAmp: 1, bossHunter: 1, glassCannon: 1 } },
       { name: "追踪", color: "#4dabf7", weights: { range: 1, fireRate: 1, swarmCore: 3, homingShards: 3, magnetCore: 1, comboBattery: 1, comboSurge: 1 } },
       { name: "导弹", color: "#ff922b", weights: { missileRack: 3, explosivePayload: 3, clusterWarheads: 3, missileInterceptor: 2, fireRate: 1, range: 1, bossHunter: 1 } },
@@ -1255,7 +1259,7 @@ const game = {
         if (e.dead || b.hitEnemies.has(e)) continue;
         if (!hit(b, e)) continue;
         b.hitEnemies.add(e); this.spawnHitSpark(b.x, b.y);
-        if (e.damage(this.playerDamage(this.mainBulletDamage(), e))) this.onEnemyKilled(e);
+        if (e.damage(this.playerDamage(this.mainBulletDamage(e), e))) this.onEnemyKilled(e);
         if (b.pierce > 0) { b.pierce--; continue; }
         b.dead = true; break;
       }
