@@ -619,6 +619,15 @@ const game = {
     const info = this.routePreviewInfo(card);
     return info ? "路线 " + info.top.name + " +" + info.top.gain + (info.unlocked ? " · 解锁共鸣" : "") : "";
   },
+  draftProgressText(card) {
+    if (!card) return "";
+    if (card.type === "bonus") {
+      const n = this.bonusStacks(card.key);
+      return "×" + n + "→×" + (n + 1);
+    }
+    const cur = Math.ceil(this.chips[card.key] || 0), dur = Math.ceil((CONFIG.chips[card.key] || {}).duration || 0);
+    return cur > 0 ? cur + "s→" + dur + "s" : dur + "s";
+  },
   draftCardWeight(id) {
     const card = this.cardInfo(id); if (!card) return 0;
     let w = card.weight || 100;
@@ -1467,13 +1476,13 @@ const game = {
     for (let i = 0; i < 3; i++) {
       const card = this.cardInfo(this._chipChoices[i] || "");
       if (!card) continue;
-      const r = this.chipChoiceRect(i), stack = card.type === "bonus" ? this.bonusStacks(card.key) : 0;
+      const r = this.chipChoiceRect(i);
       const rarityColor = { "普通": "#adb5bd", "稀有": "#cc5de8", "史诗": "#ffd43b" }[card.rarity] || "#adb5bd";
       UI.panel(ctx, r.x, r.y, r.w, r.h, 12, { accent: card.color, top: UI.rgba(card.color, .14), bottom: "rgba(255,255,255,.03)", lineWidth: card.rarity === "史诗" ? 2.4 : 1.5 });
       this.drawChipCardIcon(ctx, card, r.x + 48, r.y + r.h / 2, 27);
       this.drawRarityBadge(ctx, r.x + r.w - 18, r.y + 28, card.rarity, rarityColor);
       ctx.textAlign = "left";
-      ctx.fillStyle = rarityColor; ctx.font = "bold 13px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + " · " + (card.type === "chip" ? "限时技能" : "永久 BONUS") + (stack ? " · 已选×" + stack : ""), r.x + 88, r.y + 25);
+      ctx.fillStyle = rarityColor; ctx.font = "bold 13px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + " · " + (card.type === "chip" ? "限时技能" : "永久 BONUS") + " · " + this.draftProgressText(card), r.x + 88, r.y + 25);
       ctx.fillStyle = "#fff"; ctx.font = "bold 23px 'Segoe UI', sans-serif"; ctx.fillText(card.name, r.x + 88, r.y + 51);
       ctx.fillStyle = "#ced4da"; ctx.font = "14px 'Segoe UI', sans-serif";
       UI.wrapText(ctx, card.desc, r.w - 118, 1).forEach((line, j) => ctx.fillText(line, r.x + 88, r.y + 73 + j * 17));
