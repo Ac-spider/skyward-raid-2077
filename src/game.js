@@ -925,8 +925,16 @@ const game = {
     b._affixTimer = a.every || 5;
     if (a.attack === "laser") this.spawnBossLaser(this.player ? this.player.x : b.x, a.warn || 0.55, a.dur || 0.65, a.width || 42, b.bulletDamage * (a.damageMult || 1));
     else if (a.attack === "escort") this.spawnBossEscort(b, a);
+    else if (a.attack === "repair" && !this.repairBoss(b, a)) return;
     this.spawnShockwave(b.x, b.y, b.radius * 1.8, a.color);
     Sound.tone(620, 0.08, "triangle", 0.1, 180);
+  },
+  repairBoss(b, a) {
+    if (!b || b.hp >= b.maxHp) return false;
+    const heal = Math.min(b.maxHp - b.hp, Math.max(1, Math.round(b.maxHp * (a.healPct || 0.03))));
+    b.hp += heal;
+    this.floats.push(new FloatText(b.x, b.y - b.radius - 20, "维修 +" + heal, a.color));
+    return true;
   },
   spawnBossEscort(b, a) {
     const activeAdds = this.enemies.filter(e => !e.dead && !e.isBoss).length;
