@@ -95,7 +95,7 @@ const CONFIG = {
     sideGuns: { name: "侧翼炮组", desc: "主炮附加斜向火力", color: "#ffd43b", duration: 10, angle: 22 },
     volatileCore: { name: "危险过载", desc: "分数更高,承伤也更高", color: "#ff6b6b", duration: 9, scoreBonus: 0.35, threatGainMult: 1.35, damageTakenMult: 1.18 },
   },
-  bonusOrder: ["damage", "fireRate", "range", "maxHp", "reinforcedHull", "fieldRepair", "leech", "missileRack", "pierce", "chainSpark", "pointDefense", "salvage", "kineticAmmo", "laserLens", "laserSplitter", "swarmCore", "homingShards", "explosivePayload", "missileInterceptor", "magnetCore", "comboBattery", "comboSurge", "chargeAmp", "executioner", "reactiveArmor", "lastStand", "glassCannon", "bossHunter", "adrenaline", "emergencyBarrier", "overdrive"],
+  bonusOrder: ["damage", "fireRate", "range", "maxHp", "reinforcedHull", "fieldRepair", "leech", "missileRack", "pierce", "chainSpark", "pointDefense", "salvage", "kineticAmmo", "laserLens", "laserSplitter", "swarmCore", "homingShards", "explosivePayload", "clusterWarheads", "missileInterceptor", "magnetCore", "comboBattery", "comboSurge", "chargeAmp", "executioner", "reactiveArmor", "lastStand", "glassCannon", "bossHunter", "adrenaline", "emergencyBarrier", "overdrive"],
   bonuses: {
     damage: { name: "火力校准", desc: "全武器伤害 +15%", color: "#ff6b6b", damageMult: 0.15 },
     fireRate: { name: "加速扳机", desc: "主炮/副武器射速 +10%", color: "#4dabf7", cooldownMult: 0.10 },
@@ -115,6 +115,7 @@ const CONFIG = {
     swarmCore: { name: "蜂群协议", desc: "追踪弹 +1,锁定和伤害提升", color: "#4dabf7", rarity: "稀有", weight: 38, extraCount: 1, homingDamage: 1, targetRangeMult: 0.12 },
     homingShards: { name: "追踪裂片", desc: "追踪弹命中时溅射附近敌人", color: "#4dabf7", rarity: "稀有", weight: 32, damage: 2, range: 120 },
     explosivePayload: { name: "高爆载荷", desc: "导弹伤害和爆炸范围提升", color: "#ff922b", rarity: "稀有", weight: 38, missileDamage: 3, splashMult: 0.25 },
+    clusterWarheads: { name: "集束弹头", desc: "导弹命中后释放追踪子弹", color: "#ff922b", rarity: "史诗", weight: 18, count: 2, maxCount: 5 },
     missileInterceptor: { name: "拦截爆破", desc: "导弹爆炸会清除爆点附近敌弹", color: "#ff922b", rarity: "稀有", weight: 32, rangeMult: 0.95 },
     magnetCore: { name: "回收磁场", desc: "补给吸附范围 +70%", color: "#20c997", magnetMult: 0.70 },
     comboBattery: { name: "连击电池", desc: "每 10 连击获得能量和护盾", color: "#ffd43b", rarity: "稀有", weight: 36, energy: 16, shield: 8, dur: 4 },
@@ -265,7 +266,7 @@ const CONFIG = {
       ],
     },
   },
-  challenge: { rulesVersion: 12, splits: [30, 60, 120] },
+  challenge: { rulesVersion: 13, splits: [30, 60, 120] },
 
   combo: { timeout: 2.5, scoreStep: 0.15, maxMult: 5, resetOnHit: false },
 

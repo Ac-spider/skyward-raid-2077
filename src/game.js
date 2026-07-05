@@ -562,7 +562,7 @@ const game = {
       { name: "主炮", color: "#ffd43b", weights: { damage: 1, fireRate: 1, pierce: 2, kineticAmmo: 2, chainSpark: 1, pointDefense: 1, executioner: 1, glassCannon: 1, overdrive: 1 } },
       { name: "激光", color: "#cc5de8", weights: { damage: 1, range: 1, laserLens: 3, laserSplitter: 3, chargeAmp: 1, bossHunter: 1, glassCannon: 1 } },
       { name: "追踪", color: "#4dabf7", weights: { range: 1, fireRate: 1, swarmCore: 3, homingShards: 3, magnetCore: 1, comboBattery: 1, comboSurge: 1 } },
-      { name: "导弹", color: "#ff922b", weights: { missileRack: 3, explosivePayload: 3, missileInterceptor: 2, fireRate: 1, range: 1, bossHunter: 1 } },
+      { name: "导弹", color: "#ff922b", weights: { missileRack: 3, explosivePayload: 3, clusterWarheads: 3, missileInterceptor: 2, fireRate: 1, range: 1, bossHunter: 1 } },
       { name: "生存", color: "#38d9a9", weights: { maxHp: 2, reinforcedHull: 3, fieldRepair: 3, leech: 2, salvage: 2, reactiveArmor: 2, lastStand: 3, emergencyBarrier: 3, magnetCore: 1, pointDefense: 2, missileInterceptor: 1 } },
       { name: "风险", color: "#ff6b6b", weights: { glassCannon: 3, overdrive: 3, adrenaline: 3, comboSurge: 2, executioner: 1, bossHunter: 1 } },
     ].map(r => {
@@ -756,6 +756,14 @@ const game = {
     if (!stacks) return;
     const cfg = CONFIG.bonuses.missileInterceptor;
     this.clearEnemyBulletsNear(src.x, src.y, range * (cfg.rangeMult + stacks * 0.08), cfg.color, "拦截");
+  },
+  triggerClusterWarheads(src) {
+    const stacks = this.bonusStacks("clusterWarheads"), cfg = CONFIG.bonuses.clusterWarheads;
+    if (!stacks) return 0;
+    const count = Math.min(cfg.maxCount || 5, (cfg.count || 2) + stacks - 1);
+    for (let i = 0; i < count; i++) this.spawnHomingShot(src.x + (i - (count - 1) / 2) * 10, src.y, Math.max(0, (src.overcharge || 0) - 1));
+    this.floats.push(new FloatText(src.x, src.y - 18, "集束 ×" + count, cfg.color));
+    return count;
   },
   triggerReactiveArmor(src) {
     const stacks = this.bonusStacks("reactiveArmor");
@@ -1251,6 +1259,7 @@ const game = {
         m.dead = true; this.burst(m.x, m.y, "#ff922b", 12, 190); this.spawnShockwave(m.x, m.y, m.splash, "#ff922b");
         Sound.missileHit();
         this.triggerMissileInterceptor(m, m.splash);
+        this.triggerClusterWarheads(m);
         const missileDmg = this.playerDamage(m.damage, e);
         if (e.damage(missileDmg)) this.onEnemyKilled(e);
         const splashDmg = Math.max(1, Math.round(m.damage * 0.45));
@@ -1393,7 +1402,7 @@ const game = {
   drawChipCardIcon(ctx, card, x, y, r) {
     const key = card.key, col = card.color;
     UI.roundButton(ctx, x, y, r, col, { alpha: .86, stroke: UI.rgba(col, .9), lineWidth: 1.8 });
-    if (key.includes("missile") || key.includes("Payload")) this.drawSecondaryWeaponIcon(ctx, x, y, r * .9, "missile", "#fff");
+    if (key.includes("missile") || key.includes("Payload") || key.includes("Warhead") || key.includes("cluster")) this.drawSecondaryWeaponIcon(ctx, x, y, r * .9, "missile", "#fff");
     else if (key.includes("laser") || key.includes("Lens")) this.drawSecondaryWeaponIcon(ctx, x, y, r * .9, "laser", "#fff");
     else if (key.includes("homing") || key.includes("swarm")) this.drawSecondaryWeaponIcon(ctx, x, y, r * .9, "homing", "#fff");
     else if (key.includes("shield") || key.includes("Armor") || key.includes("Defense") || key.includes("salvage") || key.includes("Barrier") || key.includes("Hull") || key.includes("Hp") || key.includes("Stand") || key.includes("Repair") || key === "capacitor") this.drawSpecialIcon(ctx, x, y, r * .86, "shield", "#fff");
