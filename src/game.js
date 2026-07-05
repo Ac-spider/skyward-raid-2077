@@ -562,8 +562,8 @@ const game = {
   },
   routeReady(name) { return this.routeScore(name) >= 7; },
   routeBonus(name, amount) { return this.routeReady(name) ? amount : 0; },
-  routePreviewText(card) {
-    if (!card || card.type !== "bonus") return "";
+  routePreviewInfo(card) {
+    if (!card || card.type !== "bonus") return null;
     const next = Object.assign({}, this.bonuses);
     next[card.key] = (next[card.key] || 0) + 1;
     const before = this.buildRouteSummary(this.bonuses).routes;
@@ -571,9 +571,20 @@ const game = {
       const old = before.find(b => b.name === r.name);
       return Object.assign({ gain: r.score - (old ? old.score : 0) }, r);
     }).filter(r => r.gain > 0).sort((a, b) => b.gain - a.gain);
-    if (!gains.length) return "";
     const unlocked = gains.some(r => r.score >= 7 && r.score - r.gain < 7);
-    return "路线 " + gains[0].name + " +" + gains[0].gain + (unlocked ? " · 解锁共鸣" : "");
+    return gains.length ? { top: gains[0], unlocked } : null;
+  },
+  routePreviewText(card) {
+    const info = this.routePreviewInfo(card);
+    return info ? "路线 " + info.top.name + " +" + info.top.gain + (info.unlocked ? " · 解锁共鸣" : "") : "";
+  },
+  draftCardWeight(id) {
+    const card = this.cardInfo(id); if (!card) return 0;
+    let w = card.weight || 100;
+    const info = this.routePreviewInfo(card), top = this.buildRouteSummary().top;
+    if (info && info.unlocked) w *= 1.65;
+    else if (info && top.score >= 3 && info.top.name === top.name) w *= 1.35;
+    return w;
   },
   chipChoiceRect(i) { return { x: 40, y: 238 + i * 104, w: CONFIG.WIDTH - 80, h: 92 }; },
   chipChoiceHit(px, py) {
@@ -590,10 +601,10 @@ const game = {
     const pool = CONFIG.chipOrder.map(k => "chip:" + k).concat(CONFIG.bonusOrder.map(k => "bonus:" + k)).filter(id => !skip.has(id));
     this._chipChoices = [];
     while (this._chipChoices.length < 3 && pool.length) {
-      const total = pool.reduce((s, id) => s + ((this.cardInfo(id) || {}).weight || 0), 0);
+      const total = pool.reduce((s, id) => s + this.draftCardWeight(id), 0);
       if (total <= 0) break;
       let r = this.rng() * total, i = 0;
-      for (; i < pool.length - 1; i++) { r -= (this.cardInfo(pool[i]) || {}).weight || 0; if (r <= 0) break; }
+      for (; i < pool.length - 1; i++) { r -= this.draftCardWeight(pool[i]); if (r <= 0) break; }
       this._chipChoices.push(pool.splice(i, 1)[0]);
     }
   },
