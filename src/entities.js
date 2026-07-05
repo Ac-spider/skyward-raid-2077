@@ -8,7 +8,7 @@ class Player {
     const c = CONFIG.player, ship = game.ship;
     this.ship = ship;
     this.x = c.startX; this.y = c.startY; this.radius = c.radius * (ship.radiusMult || 1);
-    this.maxHp = Math.round(c.maxHp * ship.hpMult * (game.endless ? CONFIG.endless.hpMult : 1)); this.hp = this.maxHp;
+    this.maxHp = Math.round(c.maxHp * ship.hpMult * (game.endless ? CONFIG.endless.hpMult : 1)); this.baseMaxHp = this.maxHp; this.hp = this.maxHp;
     this.fireInterval = c.fireInterval * ship.fireMult;
     this.power = 1; this.overcharge = 0;
     this.bombs = clamp(game.activeDiff.startBombs + ship.bombs, 0, CONFIG.player.maxBombs);
