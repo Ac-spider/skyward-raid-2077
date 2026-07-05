@@ -26,7 +26,7 @@ function resetJoystick() {
   input.joyKnobX = CONFIG.joystick.baseX; input.joyKnobY = CONFIG.joystick.baseY;
 }
 canvas.addEventListener("pointerdown", (e) => {
-  Sound.resume();
+  Sound.resume(); Music.resume();
   const p = toLogic(e.clientX, e.clientY);
   if (game.state === "title") { if (game.titleSettingsHit(p.x, p.y)) { game._resetArmed = false; game.state = "settings"; return; } if (game.titleCodexHit(p.x, p.y)) { game.toCodex(); return; } if (game.titleHelpHit(p.x, p.y)) { game.toTutorial(); return; } if (game.titleShipHit(p.x, p.y)) { game.toShipSelect(); return; } if (game.titleEndlessHit(p.x, p.y)) { game.startEndless(); return; } if (game.titleStartHit(p.x, p.y)) game.toMap(); return; }
   if (game.state === "endlessover") { game.endless = false; game.toTitle(); return; }
@@ -77,6 +77,7 @@ canvas.addEventListener("pointercancel", (e) => {
   game._sliderDrag = false; game._shipDragging = false; game._codexDragging = false; game._tutorialDragging = false; game._mapDragging = false;
 });
 window.addEventListener("keydown", (e) => {
+  Sound.resume(); Music.resume();
   if (e.key === "b" || e.key === "B" || e.code === "Space") { if (game.state === "playing") game.useBomb(); e.preventDefault(); }
   if (e.key === "x" || e.key === "X") { if (game.state === "playing") game.useSpecial(); e.preventDefault(); }
   if (e.key === "p" || e.key === "P" || e.key === "Escape") { game.togglePause(); e.preventDefault(); }

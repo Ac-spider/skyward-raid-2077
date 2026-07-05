@@ -38,8 +38,8 @@ const game = {
   itemAutoInterval() { return CONFIG.powerup.autoInterval * (this.isBossLevel() ? this.activeDiff.itemDropMult : 1); },
   // T:无尽模式统一使用固定难度(不受地图选择影响);常规关卡仍用地图选的 this.diff
   get activeDiff() { return this.endless ? CONFIG.difficulties[CONFIG.endless.diffKey] : this.diff; },
-  toTitle() { this.state = "title"; },
-  toMap() { this.state = "map"; },
+  toTitle() { this.state = "title"; Music.play(); },
+  toMap() { this.state = "map"; Music.play(); },
   // 某关是否解锁:首关或前一关已通关
   isUnlocked(i) { return i === 0 || Progress.isCleared(LEVELS[i - 1].id); },
   setDiff(diffKey) { this.diff = CONFIG.difficulties[diffKey]; Settings.set("diff", diffKey); },
@@ -482,6 +482,7 @@ const game = {
         if (e.dead) continue;
         if (!hit(m, e)) continue;
         m.dead = true; this.burst(m.x, m.y, "#ff922b", 12, 190); this.spawnShockwave(m.x, m.y, m.splash, "#ff922b");
+        Sound.missileHit();
         if (e.damage(m.damage)) this.onEnemyKilled(e);
         const splashDmg = Math.max(1, Math.round(m.damage * 0.45));
         for (const other of this.enemies) {

@@ -30,6 +30,10 @@ const Sound = {
     s.connect(f).connect(g).connect(this.ctx.destination); s.start(t); s.stop(t + dur);
   },
   shoot()      { this.tone(880, 0.03, "square", 0.012); },
+  homing()     { this.tone(1180, 0.045, "triangle", 0.018, 760); },
+  laser()      { this.tone(520, 0.08, "sawtooth", 0.04, 980); this.tone(1560, 0.05, "triangle", 0.018, 940); },
+  missile()    { this.noise(0.12, 0.055, 700); this.tone(150, 0.10, "sawtooth", 0.045, 95); },
+  missileHit() { this.noise(0.24, 0.22, 1300); this.tone(110, 0.18, "sawtooth", 0.08, 48); },
   // GG:按敌机体型分级的爆炸音色 —— 小的短促尖锐,大的低沉更有分量
   explosion(tier) {
     if (tier === "large") { this.noise(0.42, 0.32, 900); this.tone(90, 0.35, "sawtooth", 0.16, 40); }
@@ -44,51 +48,31 @@ const Sound = {
 };
 
 /* =====================================================================
- * 1.52) BGM(M)—— WebAudio 合成的循环音乐,由主循环按 dt 步进,仅在对局时发声
+ * 1.52) BGM(M)—— 用户提供的循环音乐
  * ===================================================================== */
-// UU:BGM 重做 —— 原来 lead 用方波、几乎没有起音过渡、BOSS 战还把音符密度和速度一起翻倍,
-// 听起来就是又急又冲的"滴滴滴"报警声。这次把音色换软、加了起音渐入和低通滤波去掉数码毛刺、
-// 音符时值拉长做legato(而不是一个个孤立的短促音块),BOSS 的紧张感改由"低音更沉+周期性持续低音铺底"来营造,
-// 而不是单纯地提速加密——听觉上更接近"紧张的配乐"而不是"闹钟"。
 const Music = {
-  playing: false, step: 0, timer: 0, stepDur: 0.18, gain: 0.09,
-  enabled: true, volume: 0.8,   // JJ:独立于 Sound 的音乐开关/音量(共用同一个 Sound.ctx 这个 AudioContext,但音量/开关分开)
-  // W2:世界1-3独立根音,世界4复用世界1(原有设计不变);世界5起改用第4个根音——如果只是简单取模(5-1)%3 又会绕回世界2,
-  //   听不出"新世界"的差异,所以下面 update() 里对 world>=5 单独给了固定的第4档,不再走纯取模。
-  roots: [220.0, 174.6, 196.0, 246.9],
-  endlessRoot: 164.8,   // X3:无尽模式专属根音(比世界1-5都更低更沉),不跟着 game.world 每40秒切换背景一起变,给无尽一个统一、更有"终章感"的基调
-  bass: [0, 0, 7, 0, 5, 5, 3, 7],                       // 相对根音半音级
-  lead: [12, 15, 19, 22, 19, 15, 17, 12],
-  bossBass: [0, 3, 0, 3, 5, 3, 7, 5],   // BOSS 战低音型音程更紧张(小三度),但节奏不再加密
-  play() { this.playing = true; this.step = 0; this.timer = 0; },
-  stop() { this.playing = false; },
-  update(dt) {
-    if (!this.playing || !this.enabled || this.volume <= 0 || !Sound.ctx || game.state !== "playing") return;
-    const boss = !!game.boss, tense = boss || game.endless;   // X3:无尽模式全程当"紧张态"处理(低音型+持续铺底),不只是撞到BOSS才有终章感
-    // X4:无尽模式的"紧张强度"随存活时间缓慢爬升(5分钟/300秒封顶),而不是从进无尽的第一秒就和后面一样强——
-    //   只加音量/音色的浓度,不碰节奏/速度(碰速度就是重蹈 v2.9 之前"加速=报警声"的坑,见 memory 里的教训)。
-    //   刻意不让它超过真正BOSS战的强度(boss 分支数值不变),BOSS战依然是全场最紧张的时刻。
-    const ei = game.endless ? clamp(game._endlessT / 300, 0, 1) : 0;
-    const stepDur = this.stepDur * (boss ? 0.92 : 1);   // UU:只轻微提速(之前 0.72 太急),避免报警感
-    this.timer -= dt;
-    if (this.timer > 0) return;
-    this.timer += stepDur;
-    const wi = game.world <= 4 ? (game.world - 1) % 3 : 3, root = game.endless ? this.endlessRoot : this.roots[wi], i = this.step % 8;
-    const bassArr = tense ? this.bossBass : this.bass;
-    this._note(root / 2 * Math.pow(2, bassArr[i] / 12), stepDur * 1.5, "triangle", this.gain * (boss ? 1.1 : (game.endless ? 1 + ei * 0.15 : 1)), 1100);
-    if (i % 2 === 0) this._note(root * Math.pow(2, this.lead[i] / 12), stepDur * 1.3, "triangle", this.gain * (boss ? 0.5 : (game.endless ? 0.40 + ei * 0.10 : 0.42)), 2400);
-    // UU:BOSS战紧张感靠"每循环一次的持续低音铺底"而不是靠加速加密——氛围感,不刺耳
-    // X3:无尽模式全程都铺这层持续低音(音量比BOSS战略低,避免一直很吵),而不是只有撞上BOSS的35秒才有,让整局无尽都有终章般的氛围感
-    if (tense && i === 0) this._note(root / 4, stepDur * 7.5, "sine", boss ? 0.06 : (0.03 + ei * 0.025), 480);
-    this.step++;
+  src: "assets/audio/above-the-sprawl.mp3",
+  playing: false, enabled: true, volume: 0.8, track: null,
+  init() {
+    if (this.track || typeof Audio === "undefined") return;
+    this.track = new Audio(this.src);
+    this.track.loop = true; this.track.preload = "auto";
+    this.applyVolume();
   },
-  // UU:加了柔和起音(15ms 线性渐入,消掉数码"咔"声)+ 低通滤波(滤掉刺耳的高频毛刺,音色更圆润)
-  _note(freq, dur, type, gain, cutoff) {
-    const c = Sound.ctx, t = c.currentTime, o = c.createOscillator(), g = c.createGain(), f = c.createBiquadFilter();
-    o.type = type; o.frequency.setValueAtTime(freq, t);
-    f.type = "lowpass"; f.frequency.setValueAtTime(cutoff || 2200, t);
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain * this.volume, t + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(f).connect(g).connect(c.destination); o.start(t); o.stop(t + dur);
+  applyVolume() { if (this.track) this.track.volume = this.enabled ? clamp(this.volume, 0, 1) : 0; },
+  play() { this.playing = true; this.init(); this.applyVolume(); this.resume(); },
+  stop() { this.playing = false; if (this.track) this.track.pause(); },
+  resume() {
+    if (!this.playing || !this.enabled || this.volume <= 0) return;
+    this.init();
+    if (!this.track) return;
+    const p = this.track.play();
+    if (p && p.catch) p.catch(() => {});
+  },
+  update() {
+    this.applyVolume();
+    if (!this.playing || !this.enabled || this.volume <= 0) { if (this.track && !this.track.paused) this.track.pause(); return; }
+    if (this.track && this.track.paused) this.resume();
   },
 };
 

@@ -57,11 +57,12 @@ class Player {
         this._homingTimer = Math.max(0.32, s.homingInterval - oc * 0.05);
         const count = 1 + (oc >= 3 ? 1 : 0);
         for (let i = 0; i < count; i++) game.spawnHomingShot(this.x + (i - (count - 1) / 2) * 18, this.y - this.radius, oc);
+        Sound.homing();
       }
     }
     if (this.power >= s.laserPower) {
       this._laserTimer -= dt;
-      if (this._laserTimer <= 0) { this._laserTimer = Math.max(0.55, s.laserInterval - oc * 0.06); game.spawnPlayerLaser(this.x, this.y - this.radius, oc); }
+      if (this._laserTimer <= 0) { this._laserTimer = Math.max(0.55, s.laserInterval - oc * 0.06); game.spawnPlayerLaser(this.x, this.y - this.radius, oc); Sound.laser(); }
     }
     if (this.power >= s.missilePower) {
       this._missileTimer -= dt;
@@ -69,6 +70,7 @@ class Player {
         this._missileTimer = Math.max(0.75, s.missileInterval - oc * 0.04);
         game.spawnMissile(this.x - 16, this.y + 4, oc);
         game.spawnMissile(this.x + 16, this.y + 4, oc);
+        Sound.missile();
       }
     }
   }
