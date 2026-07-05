@@ -531,6 +531,25 @@ const game = {
     const parts = id.split(":"), type = parts[0], key = parts[1], src = type === "chip" ? CONFIG.chips[key] : CONFIG.bonuses[key];
     return src ? { type, key, name: src.name, desc: src.desc || "", color: src.color || "#4dabf7", rarity: src.rarity || "普通", weight: src.weight || 100 } : null;
   },
+  buildRouteSummary(source = this.bonuses) {
+    const routes = [
+      { name: "主炮", color: "#ffd43b", weights: { damage: 1, fireRate: 1, pierce: 2, kineticAmmo: 2, chainSpark: 1, executioner: 1, glassCannon: 1, overdrive: 1 } },
+      { name: "激光", color: "#cc5de8", weights: { damage: 1, range: 1, laserLens: 3, chargeAmp: 1, bossHunter: 1, glassCannon: 1 } },
+      { name: "追踪", color: "#4dabf7", weights: { range: 1, fireRate: 1, swarmCore: 3, magnetCore: 1, comboBattery: 1 } },
+      { name: "导弹", color: "#ff922b", weights: { missileRack: 3, explosivePayload: 3, fireRate: 1, range: 1, bossHunter: 1 } },
+      { name: "生存", color: "#38d9a9", weights: { maxHp: 2, leech: 2, salvage: 2, reactiveArmor: 2, emergencyBarrier: 3, magnetCore: 1 } },
+      { name: "风险", color: "#ff6b6b", weights: { glassCannon: 3, overdrive: 3, adrenaline: 3, executioner: 1, bossHunter: 1 } },
+    ].map(r => {
+      const score = Object.keys(r.weights).reduce((sum, key) => sum + (source[key] || 0) * r.weights[key], 0);
+      const stage = score >= 7 ? "成型" : score >= 3 ? "偏向" : "起步";
+      return Object.assign({ score, stage }, r);
+    }).filter(r => r.score > 0).sort((a, b) => b.score - a.score);
+    return { top: routes[0] || { name: "未成型", color: "#adb5bd", score: 0, stage: "" }, routes };
+  },
+  buildRouteText(source = this.bonuses, limit = 2) {
+    const routes = this.buildRouteSummary(source).routes.slice(0, limit);
+    return routes.length ? routes.map(r => r.name + r.stage).join(" / ") : "未成型";
+  },
   chipChoiceRect(i) { return { x: 40, y: 238 + i * 104, w: CONFIG.WIDTH - 80, h: 92 }; },
   chipChoiceHit(px, py) {
     for (let i = 0; i < 3; i++) { const r = this.chipChoiceRect(i); if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return i; }
@@ -1199,9 +1218,11 @@ const game = {
     UI.panel(ctx, x, y, w, h, 12, { accent: "#4dabf7", top: "rgba(77,171,247,.09)", bottom: "rgba(255,255,255,.02)" });
     ctx.save(); ctx.textAlign = "left"; ctx.textBaseline = "middle";
     ctx.fillStyle = "#fff"; ctx.font = "bold 16px 'Segoe UI', sans-serif"; ctx.fillText("当前构筑", x + 16, y + 23);
+    const route = this.buildRouteSummary();
+    ctx.fillStyle = route.top.color; ctx.font = "bold 13px 'Segoe UI', sans-serif"; ctx.fillText("路线 " + this.buildRouteText(), x + 94, y + 23);
     ctx.fillStyle = "#adb5bd"; ctx.font = "13px 'Segoe UI', sans-serif";
-    if (!keys.length && !active.length) ctx.fillText("暂无永久 BONUS", x + 16, y + 56);
-    let bx = x + 16, by = y + 56, shown = 0;
+    if (!keys.length && !active.length) ctx.fillText("暂无永久 BONUS", x + 16, y + 62);
+    let bx = x + 16, by = y + 62, shown = 0;
     const drawBadge = (text, color) => {
       const bw = Math.min(136, Math.max(70, ctx.measureText(text).width + 18));
       if (bx + bw > x + w - 16) { bx = x + 16; by += 30; }
@@ -1293,10 +1314,11 @@ const game = {
     const chipText = chipKeys.length ? chipKeys.map(k => (CONFIG.chips[k] ? CONFIG.chips[k].name : k) + "×" + r.chips[k]).slice(0, 3).join(" / ") : "无";
     const bonusKeys = Object.keys(r.bonuses || {}).filter(k => r.bonuses[k] > 0);
     const bonusText = bonusKeys.length ? bonusKeys.map(k => (CONFIG.bonuses[k] ? CONFIG.bonuses[k].name : k) + "×" + r.bonuses[k]).slice(0, 3).join(" / ") : "无";
+    const routeText = this.buildRouteText(r.bonuses || {}, 2);
     ctx.fillStyle = "#adb5bd"; ctx.font = "13px 'Segoe UI', sans-serif";
-    if (compactResult) { ctx.fillText(fitLine("威胁 Lv." + (r.maxThreat || 0) + " · 事件 " + eventText + " · 芯片 " + chipText + " · BONUS " + bonusText, 356), cx, infoY); infoY += 18; }
+    if (compactResult) { ctx.fillText(fitLine("威胁 Lv." + (r.maxThreat || 0) + " · 路线 " + routeText + " · 事件 " + eventText + " · BONUS " + bonusText, 356), cx, infoY); infoY += 18; }
     else {
-      ctx.fillText("最高威胁 Lv." + (r.maxThreat || 0) + " · 事件 " + eventText, cx, infoY); infoY += 18;
+      ctx.fillText(fitLine("最高威胁 Lv." + (r.maxThreat || 0) + " · 路线 " + routeText + " · 事件 " + eventText, 356), cx, infoY); infoY += 18;
       ctx.fillText("芯片 " + chipText, cx, infoY); infoY += 22;
       ctx.fillText("BONUS " + bonusText, cx, infoY); infoY += 22;
     }
@@ -2046,6 +2068,16 @@ const game = {
     if (!active.length && !bonuses.length) return;
     let x = 16, y = 202;
     ctx.save(); ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.font = "bold 12px 'Segoe UI', sans-serif";
+    const route = this.buildRouteSummary();
+    if (route.top.score > 0) {
+      const text = "路线 " + this.buildRouteText();
+      const w = Math.max(92, ctx.measureText(text).width + 18);
+      ctx.fillStyle = "rgba(8, 16, 28, .76)"; UI.roundRect(ctx, x, y - 12, w, 24, 8); ctx.fill();
+      ctx.strokeStyle = UI.rgba(route.top.color, .82); ctx.lineWidth = 1.2; UI.roundRect(ctx, x, y - 12, w, 24, 8); ctx.stroke();
+      ctx.fillStyle = route.top.color; ctx.fillText(text, x + 9, y + 1);
+      x += w + 8;
+      if (x > CONFIG.WIDTH - 120) { x = 16; y += 28; }
+    }
     for (const key of active) {
       const c = CONFIG.chips[key], text = c.name + " " + Math.ceil(this.chips[key]) + "s";
       const w = Math.max(82, ctx.measureText(text).width + 18);
