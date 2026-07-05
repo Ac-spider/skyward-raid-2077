@@ -702,7 +702,7 @@ const game = {
   claimChipReward() {
     if (this.endless) {
       if (!this.canClaimChipReward()) return false;
-      this._nextChipDraftAt = this._endlessT + (CONFIG.powerup.chipDraftInterval || 22);
+      this._nextChipDraftAt = this._endlessT + (CONFIG.powerup.chipDraftInterval || 25);
       this.beginChipDraft(); return true;
     }
     const key = this.activateNextChip(), c = CONFIG.chips[key];
@@ -1163,7 +1163,10 @@ const game = {
       if (p.bombs >= CONFIG.player.maxBombs) { p.addEnergy(o.bombEnergy); this.floats.push(new FloatText(p.x, p.y - 34, "能量 +" + o.bombEnergy, "#ffd43b")); this.addThreat(o.threatGain); this.grantOverflowScore("#ffd43b"); }
       else { p.addBomb(); this.floats.push(new FloatText(p.x, p.y - 34, "炸弹 +1", "#cc5de8")); }
     } else if (kind === "wing") {
-      if (p.wings >= CONFIG.wingMax) { this.activateChip(o.wingChip, "侧翼炮组"); this.grantOverflowScore("#dee2e6"); }
+      if (p.wings >= CONFIG.wingMax) {
+        if (this.endless) { if (!this.claimChipReward()) this.grantOverflowScore("#dee2e6"); }
+        else { this.activateChip(o.wingChip, "侧翼炮组"); this.grantOverflowScore("#dee2e6"); }
+      }
       else { p.addWing(); this.floats.push(new FloatText(p.x, p.y - 34, "僚机 +1", "#dee2e6")); }
     } else {
       if (p.hp >= p.maxHp) { p.grantShield(o.healShield, o.healShieldDur); this.floats.push(new FloatText(p.x, p.y - 34, "临时护盾 +" + o.healShield, "#74c0fc")); this.addThreat(o.threatGain); this.grantOverflowScore("#74c0fc"); }

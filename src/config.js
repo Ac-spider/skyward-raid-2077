@@ -75,7 +75,7 @@ const CONFIG = {
 
   // weights 普通掉落;endlessWeights 无尽掉落(炸弹更稀有)。火力满级后继续吃 power 会进入超载层数。
   // autoInterval:常规关卡(非无尽)每隔多久自动刷新一个道具(秒)。
-  powerup: { radius: 14, speed: 130, dropChance: 0.14, healAmount: 12, autoInterval: 5, magnetRadius: 40, magnetSpeed: 640, chipMinPower: 5, chipMinEndlessTime: 45, chipDraftInterval: 22,
+  powerup: { radius: 14, speed: 130, dropChance: 0.14, healAmount: 12, autoInterval: 5, magnetRadius: 40, magnetSpeed: 640, chipMinPower: 5, chipMinEndlessTime: 30, chipDraftInterval: 25,
     weights:        { power: 0.47, heal: 0.22, bomb: 0.12, wing: 0.14, chip: 0.05 },
     endlessWeights: { power: 0.48, heal: 0.23, bomb: 0.04, wing: 0.13, chip: 0.12 } },
   overflow: { healShield: 30, healShieldDur: 8, bombEnergy: 26, wingChip: "sideGuns", threatGain: 18, score: 250 },
@@ -100,9 +100,9 @@ const CONFIG = {
     damage: { name: "火力校准", desc: "全武器伤害 +15%", color: "#ff6b6b", damageMult: 0.15 },
     fireRate: { name: "加速扳机", desc: "主炮/副武器射速 +10%", color: "#4dabf7", cooldownMult: 0.10 },
     range: { name: "远程弹道", desc: "锁定距离和激光持续 +20%", color: "#51cf66", rangeMult: 0.20 },
-    maxHp: { name: "装甲扩容", desc: "最大生命 +12 并治疗", color: "#38d9a9", hp: 12 },
-    reinforcedHull: { name: "复合装甲", desc: "最大生命 +10% 并治疗", color: "#20c997", rarity: "稀有", weight: 42, hpPct: 0.10 },
-    fieldRepair: { name: "纳米修复", desc: "4秒未受击后每秒回复2%最大生命", color: "#69db7c", rarity: "稀有", weight: 34, healPct: 0.02, delay: 4, tick: 1 },
+    maxHp: { name: "装甲扩容", desc: "最大生命 +12 并治疗", color: "#38d9a9", weight: 130, hp: 12 },
+    reinforcedHull: { name: "复合装甲", desc: "最大生命 +10% 并治疗", color: "#20c997", rarity: "稀有", weight: 58, hpPct: 0.10 },
+    fieldRepair: { name: "纳米修复", desc: "4秒未受击后每秒回复2%最大生命", color: "#69db7c", rarity: "稀有", weight: 42, healPct: 0.02, delay: 4, tick: 1 },
     leech: { name: "吸能核心", desc: "击杀回复 1 生命", color: "#e64980", heal: 1 },
     missileRack: { name: "备用弹仓", desc: "导弹 +1 且装填更快", color: "#ff922b", missileCount: 1, missileCooldownMult: 0.08 },
     pierce: { name: "穿甲弹链", desc: "主炮可额外穿透 1 个目标", color: "#ffd43b", pierce: 1 },
@@ -267,7 +267,7 @@ const CONFIG = {
       ],
     },
   },
-  challenge: { rulesVersion: 14, splits: [30, 60, 120] },
+  challenge: { rulesVersion: 15, splits: [30, 60, 120] },
 
   combo: { timeout: 2.5, scoreStep: 0.15, maxMult: 5, resetOnHit: false },
 
