@@ -562,6 +562,19 @@ const game = {
   },
   routeReady(name) { return this.routeScore(name) >= 7; },
   routeBonus(name, amount) { return this.routeReady(name) ? amount : 0; },
+  routePreviewText(card) {
+    if (!card || card.type !== "bonus") return "";
+    const next = Object.assign({}, this.bonuses);
+    next[card.key] = (next[card.key] || 0) + 1;
+    const before = this.buildRouteSummary(this.bonuses).routes;
+    const gains = this.buildRouteSummary(next).routes.map(r => {
+      const old = before.find(b => b.name === r.name);
+      return Object.assign({ gain: r.score - (old ? old.score : 0) }, r);
+    }).filter(r => r.gain > 0).sort((a, b) => b.gain - a.gain);
+    if (!gains.length) return "";
+    const unlocked = gains.some(r => r.score >= 7 && r.score - r.gain < 7);
+    return "路线 " + gains[0].name + " +" + gains[0].gain + (unlocked ? " · 解锁共鸣" : "");
+  },
   chipChoiceRect(i) { return { x: 40, y: 238 + i * 104, w: CONFIG.WIDTH - 80, h: 92 }; },
   chipChoiceHit(px, py) {
     for (let i = 0; i < 3; i++) { const r = this.chipChoiceRect(i); if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return i; }
@@ -614,12 +627,15 @@ const game = {
   chooseChip(i) {
     const card = this.cardInfo(this._chipChoices[i] || "");
     if (!card) return false;
+    const beforeResonance = card.type === "bonus" ? this.routeEffectText() : "";
     if (this._endlessStats) this._endlessStats.picks++;
     this._chipChoices = [];
     this._chipRerolls = 0;
     this.state = "playing";
     if (card.type === "chip") this.activateChip(card.key, "芯片 " + card.name);
     else this.activateBonus(card.key);
+    const afterResonance = card.type === "bonus" ? this.routeEffectText() : "";
+    if (afterResonance && afterResonance !== beforeResonance && this.player) this.floats.push(new FloatText(this.player.x, this.player.y - 70, "路线共鸣 " + afterResonance, card.color));
     this.grantOverflowScore(card.color);
     Sound.powerup();
     return true;
@@ -1269,7 +1285,9 @@ const game = {
       ctx.fillStyle = rarityColor; ctx.font = "bold 13px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + " · " + (card.type === "chip" ? "限时技能" : "永久 BONUS") + (stack ? " · 已选×" + stack : ""), r.x + 88, r.y + 25);
       ctx.fillStyle = "#fff"; ctx.font = "bold 23px 'Segoe UI', sans-serif"; ctx.fillText(card.name, r.x + 88, r.y + 51);
       ctx.fillStyle = "#ced4da"; ctx.font = "14px 'Segoe UI', sans-serif";
-      UI.wrapText(ctx, card.desc, r.w - 118, 2).forEach((line, j) => ctx.fillText(line, r.x + 88, r.y + 73 + j * 17));
+      UI.wrapText(ctx, card.desc, r.w - 118, 1).forEach((line, j) => ctx.fillText(line, r.x + 88, r.y + 73 + j * 17));
+      const preview = this.routePreviewText(card);
+      if (preview) { ctx.fillStyle = rarityColor; ctx.font = "bold 12px 'Segoe UI', sans-serif"; ctx.fillText(preview, r.x + 88, r.y + 88); }
     }
     this.drawChipActionButton(ctx, "reroll", this._chipRerolls > 0 ? "重抽" : "已重抽", "#4dabf7", this._chipRerolls <= 0);
     this.drawChipActionButton(ctx, "skip", "跳过拿分", "#adb5bd", false);
