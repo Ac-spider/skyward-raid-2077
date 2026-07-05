@@ -246,6 +246,29 @@ const game = {
       return b;
     };
     const close = () => overlay.remove();
+    const copyText = async (text) => {
+      const legacyCopy = () => {
+        const el = document.createElement("textarea");
+        el.value = text;
+        el.setAttribute("readonly", "");
+        style(el, { position: "fixed", left: "-9999px", top: "0", opacity: "0" });
+        document.body.appendChild(el);
+        el.focus(); el.select();
+        const ok = document.execCommand && document.execCommand("copy");
+        el.remove();
+        return ok;
+      };
+      try {
+        if (legacyCopy()) { msg.style.color = "#38d9a9"; msg.textContent = "已复制"; return; }
+      } catch (e) {}
+      try {
+        await navigator.clipboard.writeText(text);
+        msg.style.color = "#38d9a9"; msg.textContent = "已复制";
+      } catch (e) {
+        input.value = text; input.focus(); input.select();
+        msg.style.color = "#ff8787"; msg.textContent = "请手动复制文本";
+      }
+    };
     const startCode = (raw) => {
       const payload = Challenge.decode(raw);
       if (!payload) { msg.style.color = "#ff8787"; msg.textContent = "挑战码无效"; return; }
@@ -260,10 +283,7 @@ const game = {
     panel.append(title, hint, input, msg, actions, history); overlay.append(panel); document.body.appendChild(overlay);
     if (opts.readonly) {
       actions.append(
-        button("复制", "#f59f00", async () => {
-          try { await navigator.clipboard.writeText(input.value); msg.style.color = "#38d9a9"; msg.textContent = "已复制"; }
-          catch (e) { input.focus(); input.select(); msg.textContent = "请手动复制文本"; }
-        }),
+        button("复制", "#f59f00", () => copyText(input.value)),
         button("关闭", "#495057", close)
       );
     } else {
@@ -286,13 +306,14 @@ const game = {
         records.forEach(r => {
           const row = document.createElement("div"), meta = document.createElement("div"), sub = document.createElement("div");
           const ship = CONFIG.ships[r.ship] ? CONFIG.ships[r.ship].name : r.ship;
+          const code = r.code || r.lastCode, splits = Challenge.cleanSplits(r.splits || r.lastSplits);
           meta.textContent = "最佳 " + (r.score || 0) + " · " + (r.time || 0) + "s · " + ship;
-          sub.textContent = (r.daily ? "每日" : r.seed) + " · 尝试 " + (r.attempts || 1);
-          style(row, { display: "grid", gridTemplateColumns: "1fr 68px", gap: "8px", alignItems: "center", padding: "8px 0", borderTop: "1px solid rgba(255,255,255,.1)" });
+          sub.textContent = (r.daily ? "每日" : r.seed) + " · 尝试 " + (r.attempts || 1) + (splits.length ? " · 节点 " + splits.map(s => s.t + "s " + s.score).join(" / ") : "");
+          style(row, { display: "grid", gridTemplateColumns: "1fr 58px 58px", gap: "8px", alignItems: "center", padding: "8px 0", borderTop: "1px solid rgba(255,255,255,.1)" });
           style(meta, { color: "#e9ecef", fontSize: "13px", lineHeight: "1.35" });
           style(sub, { color: "#868e96", fontSize: "12px", lineHeight: "1.35", marginTop: "2px" });
           meta.appendChild(sub);
-          row.append(meta, button("重打", "#343a40", () => startCode(r.code || r.lastCode)));
+          row.append(meta, button("复制", "#495057", () => copyText(code)), button("重打", "#343a40", () => startCode(code)));
           history.appendChild(row);
         });
       }
@@ -781,8 +802,9 @@ const game = {
   drawEndlessOver(ctx) {
     const cx = CONFIG.WIDTH / 2, r = this.endlessResult || { base: this.score, diffFactor: this.activeDiff.scoreMult, time: 0, final: this.score, maxCombo: this.maxCombo };
     const top = this.endlessTop || EndlessBoard.load();
-    const targetScore = r.target && r.target.score ? r.target.score : 0;
-    const targetSplits = r.target ? Challenge.cleanSplits(r.target.splits) : [];
+    const target = r.target || null, targetScore = target && target.score ? target.score : 0;
+    const targetSplits = target ? Challenge.cleanSplits(target.splits) : [], ownSplits = Challenge.cleanSplits(r.splits);
+    const signed = (n) => (n >= 0 ? "+" : "") + n;
     let infoY = 418;
     ctx.fillStyle = "rgba(0,0,0,.78)"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
     ctx.textAlign = "center";
@@ -790,8 +812,21 @@ const game = {
     ctx.fillStyle = "#fff"; ctx.font = "22px 'Segoe UI', sans-serif"; ctx.fillText("存活 " + r.time + " 秒   最高连击 " + r.maxCombo, cx, 300);
     ctx.fillStyle = "#dee2e6"; ctx.font = "20px 'Segoe UI', sans-serif"; ctx.fillText("得分 " + this.easedCount(r.base) + "  × 难度 " + r.diffFactor.toFixed(1), cx, 336);
     ctx.fillStyle = "#fff"; ctx.font = "bold 30px 'Segoe UI', sans-serif"; ctx.fillText("最终得分  " + this.easedCount(r.final, 1.3), cx, 384);
-    if (targetScore) { ctx.fillStyle = r.final > targetScore ? "#38d9a9" : "#ffd43b"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("挑战目标 " + targetScore + "  ·  " + (r.final > targetScore ? "已超越" : "继续冲刺"), cx, infoY); infoY += 24; }
-    if (targetSplits.length) { ctx.fillStyle = "#adb5bd"; ctx.font = "14px 'Segoe UI', sans-serif"; ctx.fillText("影子节点 " + targetSplits.map(s => s.t + "s " + s.score).join(" / "), cx, infoY); infoY += 22; }
+    if (target) {
+      const ship = CONFIG.ships[target.ship] ? CONFIG.ships[target.ship].name : (target.ship || "未知机型");
+      const splitText = targetSplits.map(s => {
+        const own = ownSplits.find(o => o.t === s.t);
+        return s.t + "s " + (own ? signed(own.score - s.score) : "未到");
+      }).join(" / ");
+      const boxH = targetSplits.length ? 70 : 50;
+      ctx.fillStyle = "rgba(8,16,28,.72)"; UI.roundRect(ctx, cx - 178, infoY - 20, 356, boxH, 10); ctx.fill();
+      ctx.strokeStyle = r.final >= targetScore ? "rgba(56,217,169,.72)" : "rgba(255,212,59,.72)"; ctx.lineWidth = 1.2; UI.roundRect(ctx, cx - 178, infoY - 20, 356, boxH, 10); ctx.stroke();
+      ctx.fillStyle = r.final >= targetScore ? "#38d9a9" : "#ffd43b"; ctx.font = "bold 16px 'Segoe UI', sans-serif";
+      ctx.fillText("对手 " + targetScore + " · " + (target.time || 0) + "s · 连击 " + (target.combo || 0), cx, infoY);
+      ctx.fillStyle = "#adb5bd"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText(ship + " · 最终差 " + signed(r.final - targetScore), cx, infoY + 20);
+      if (splitText) ctx.fillText("分段差 " + splitText, cx, infoY + 40);
+      infoY += boxH + 10;
+    }
     if (r.best && r.best.score) { ctx.fillStyle = r.newBest ? "#38d9a9" : "#74c0fc"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("个人最佳 " + r.best.score + "  ·  " + (r.newBest ? "新纪录" : "差 " + Math.max(0, r.best.score - r.final)), cx, infoY); infoY += 24; }
     const boardY = infoY > 418 ? infoY + 16 : 434;
     ctx.fillStyle = "#adb5bd"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("── 无尽榜 ──", cx, boardY);
