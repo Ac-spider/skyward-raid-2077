@@ -599,9 +599,9 @@ const game = {
     const routes = [
       { name: "主炮", color: "#ffd43b", weights: { damage: 1, fireRate: 1, pierce: 2, kineticAmmo: 2, heavyRounds: 3, armorPiercer: 3, armorCaliber: 2, vitalReactor: 1, sideCannons: 3, chainSpark: 1, pointDefense: 1, shieldAmplifier: 1, executioner: 1, glassCannon: 1, overdrive: 1 } },
       { name: "激光", color: "#cc5de8", weights: { damage: 1, range: 1, laserLens: 3, laserSplitter: 3, chargeAmp: 1, bossHunter: 1, glassCannon: 1 } },
-      { name: "追踪", color: "#4dabf7", weights: { range: 1, fireRate: 1, swarmCore: 3, homingShards: 3, magnetCore: 1, comboBattery: 1, comboSurge: 1 } },
+      { name: "追踪", color: "#4dabf7", weights: { range: 1, fireRate: 1, swarmCore: 3, homingShards: 3, signalFilter: 2, magnetCore: 1, comboBattery: 1, comboSurge: 1 } },
       { name: "导弹", color: "#ff922b", weights: { missileRack: 3, explosivePayload: 3, clusterWarheads: 3, missileInterceptor: 2, fireRate: 1, range: 1, bossHunter: 1 } },
-      { name: "生存", color: "#38d9a9", weights: { maxHp: 2, reinforcedHull: 3, armorPlating: 3, fieldRepair: 3, leech: 2, painConverter: 1, salvage: 2, shieldAmplifier: 3, armorCaliber: 2, vitalReactor: 3, reactiveArmor: 2, lastStand: 3, emergencyBarrier: 3, magnetCore: 1, pointDefense: 2, missileInterceptor: 1 } },
+      { name: "生存", color: "#38d9a9", weights: { maxHp: 2, reinforcedHull: 3, armorPlating: 3, fieldRepair: 3, leech: 2, painConverter: 1, salvage: 2, shieldAmplifier: 3, armorCaliber: 2, vitalReactor: 3, reactiveArmor: 2, lastStand: 3, emergencyBarrier: 3, magnetCore: 1, pointDefense: 2, missileInterceptor: 1, signalFilter: 1 } },
       { name: "风险", color: "#ff6b6b", weights: { glassCannon: 3, overdrive: 3, adrenaline: 3, painConverter: 2, comboSurge: 2, executioner: 1, bossHunter: 1 } },
     ].map(r => {
       const score = Object.keys(r.weights).reduce((sum, key) => sum + (source[key] || 0) * r.weights[key], 0);
@@ -681,6 +681,7 @@ const game = {
     if (["kineticAmmo", "heavyRounds"].includes(key)) return "主炮伤害 " + num(this.mainBulletDamage()) + "→" + num(this.withDraftBonus(key, () => this.mainBulletDamage()));
     if (key === "armorPiercer") return "高血主炮 +" + pct(this.bonusValue(key, "heavyDamageMult")) + "→+" + pct(this.withDraftBonus(key, () => this.bonusValue(key, "heavyDamageMult")));
     if (key === "shieldAmplifier") return "有盾伤害 +" + pct(this.bonusValue(key, "damageMult")) + "→+" + pct(this.withDraftBonus(key, () => this.bonusValue(key, "damageMult")));
+    if (key === "signalFilter") return "干扰抗性 +" + pct(this.bonusValue(key, "jamResist")) + "→+" + pct(this.withDraftBonus(key, () => this.bonusValue(key, "jamResist")));
     if (["damage", "glassCannon", "bossHunter"].includes(key)) return "伤害倍率 " + pct(this.playerDamage(1, { isBoss: key === "bossHunter", hp: 1, maxHp: 1 })) + "→" + pct(this.withDraftBonus(key, () => this.playerDamage(1, { isBoss: key === "bossHunter", hp: 1, maxHp: 1 })));
     if (["fireRate", "overdrive"].includes(key)) return "武器冷却 " + pct(this.weaponCooldownMult()) + "→" + pct(this.withDraftBonus(key, () => this.weaponCooldownMult()));
     if (["armorPlating"].includes(key)) return "承伤 " + pct(this.damageTakenMult()) + "→" + pct(this.withDraftBonus(key, () => this.damageTakenMult()));
@@ -985,7 +986,7 @@ const game = {
         if (dx * dx + dy * dy <= r * r) slow = Math.max(slow, e.eliteCfg.weaponSlow || 1);
       }
     }
-    return slow;
+    return 1 + (slow - 1) * Math.max(0.35, 1 - this.bonusValue("signalFilter", "jamResist"));
   },
   repairNearbyEnemies(src) {
     const r = src.cfg.repairRadius || 0, amt = src.cfg.repairAmount || 0;
@@ -2489,6 +2490,7 @@ const game = {
     if (key === "armorCaliber" && n > 0) return b.name + " +" + this.armorCaliberDamage();
     if (key === "vitalReactor" && n > 0) return b.name + " +" + Math.round(this.vitalReactorDamageMult() * 100) + "%";
     if (key === "shieldAmplifier" && n > 0) return b.name + " +" + Math.round(this.bonusValue(key, "damageMult") * 100) + "%" + (this.player && this.player.shieldHp > 0 ? " 激活" : "");
+    if (key === "signalFilter" && n > 0) return b.name + " +" + Math.round(this.bonusValue(key, "jamResist") * 100) + "%";
     return b.name + "×" + n;
   },
   drawEndlessEventHUD(ctx) {

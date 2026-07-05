@@ -48,6 +48,10 @@ for (const key of eliteTypes) {
 game.boss = null; game.enemies = [{ dead: false, x: 100, y: 100, radius: 20, type: "medium", eliteCfg: CONFIG.elite.jammer }];
 assert(game.jamFactor(100, 100) > 1, "jammer elite should slow weapons in range");
 assert.strictEqual(game.jamFactor(500, 100), 1, "jammer elite should not slow weapons out of range");
+const jammedWithoutFilter = game.jamFactor(100, 100);
+game.bonuses = { signalFilter: 1 };
+assert(game.jamFactor(100, 100) < jammedWithoutFilter, "signalFilter should reduce jammer slow");
+game.bonuses = {};
 for (const [i, pool] of CONFIG.endless.pools.entries()) {
   assert(pool.enemies && pool.enemies.length, `endless pool ${i} is empty`);
   for (const type of pool.enemies) assert(enemyKeys.has(type), `pool ${i} references missing enemy ${type}`);
@@ -135,7 +139,7 @@ for (const a of affixes) {
 
 const bonusKeys = new Set(Object.keys(CONFIG.bonuses));
 for (const key of CONFIG.bonusOrder) assert(bonusKeys.has(key), `bonusOrder references missing bonus ${key}`);
-for (const key of ["maxHp", "reinforcedHull", "armorPlating", "fieldRepair", "leech", "painConverter", "armorCaliber", "vitalReactor", "shieldAmplifier"]) {
+for (const key of ["maxHp", "reinforcedHull", "armorPlating", "fieldRepair", "leech", "painConverter", "armorCaliber", "vitalReactor", "shieldAmplifier", "signalFilter"]) {
   assert(bonusKeys.has(key), `missing survival/build bonus ${key}`);
 }
 assert(CONFIG.bonuses.armorCaliber.hpPerDamage > 0, "armorCaliber hpPerDamage must be positive");
@@ -144,6 +148,7 @@ assert(CONFIG.bonuses.vitalReactor.hpPerDamageMult > 0, "vitalReactor hpPerDamag
 between(CONFIG.bonuses.vitalReactor.damageMult, 0.02, 0.08, "vitalReactor damageMult");
 between(CONFIG.bonuses.vitalReactor.maxDamageMult, 0.1, 0.4, "vitalReactor maxDamageMult");
 between(CONFIG.bonuses.shieldAmplifier.damageMult, 0.08, 0.3, "shieldAmplifier damageMult");
+between(CONFIG.bonuses.signalFilter.jamResist, 0.08, 0.3, "signalFilter jamResist");
 game.bonuses = { shieldAmplifier: 1 }; game.chips = {}; game.player = { hp: 100, maxHp: 100, baseMaxHp: 100, shieldHp: 0 };
 assert.strictEqual(game.playerDamage(100), 100, "shieldAmplifier should not add damage without shield");
 game.player.shieldHp = 10;
