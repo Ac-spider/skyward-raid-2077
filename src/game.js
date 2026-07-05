@@ -512,9 +512,10 @@ const game = {
   },
   mainBulletDamage(target = null) {
     let d = CONFIG.bullet.damage + this.bonusValue("kineticAmmo", "bulletDamage") + this.bonusValue("heavyRounds", "bulletDamage") + this.routeBonus("主炮", 1);
-    if (target && target.maxHp >= (CONFIG.bonuses.armorPiercer.minHp || 12)) d *= 1 + this.bonusValue("armorPiercer", "heavyDamageMult");
+    if (this.mainBulletArmorPierces(target)) d *= 1 + this.bonusValue("armorPiercer", "heavyDamageMult");
     return d;
   },
+  mainBulletArmorPierces(target) { return this.bonusStacks("armorPiercer") > 0 && target && target.maxHp >= (CONFIG.bonuses.armorPiercer.minHp || 12); },
   playerDamage(d, target = null) {
     let m = 1 + this.bonusValue("damage", "damageMult") + this.bonusValue("glassCannon", "damageMult") + this.adrenalineValue("damageMult");
     if (target && target.isBoss) m += this.bonusValue("bossHunter", "bossDamageMult");
@@ -1259,6 +1260,7 @@ const game = {
         if (e.dead || b.hitEnemies.has(e)) continue;
         if (!hit(b, e)) continue;
         b.hitEnemies.add(e); this.spawnHitSpark(b.x, b.y);
+        if (this.mainBulletArmorPierces(e) && (!e._armorPierceFx || e._armorPierceFx <= 0)) { e._armorPierceFx = 0.35; this.floats.push(new FloatText(e.x, e.y - e.radius - 10, "破甲", CONFIG.bonuses.armorPiercer.color)); }
         if (e.damage(this.playerDamage(this.mainBulletDamage(e), e))) this.onEnemyKilled(e);
         if (b.pierce > 0) { b.pierce--; continue; }
         b.dead = true; break;

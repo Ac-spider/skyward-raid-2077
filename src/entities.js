@@ -360,7 +360,7 @@ class Enemy {
     this.phase = "in"; this._ht = 0; this._aimed = false; this.vx = 0; this.vy = 0; this._flash = 0;
     this._carrierSpawn = 0;   // W2:carrier 裂解出的僚机短暂带一圈紫色识别环,归零后就是普通敌机(池复用要清零,不然会带着上一轮的状态)
     this._sniperWarn = 0; this._sniperAim = 0;
-    this._supportTimer = (t.repairInterval || 0) * (0.45 + game.rng() * 0.25); this._supportPulse = 0;
+    this._supportTimer = (t.repairInterval || 0) * (0.45 + game.rng() * 0.25); this._supportPulse = 0; this._armorPierceFx = 0;
   }
   rollElite() {
     if (this.type === "small" || !game.player) return null;
@@ -398,6 +398,7 @@ class Enemy {
     this._mt += dt;
     if (this._flash > 0) this._flash -= dt;
     if (this._carrierSpawn > 0) this._carrierSpawn -= dt;
+    if (this._armorPierceFx > 0) this._armorPierceFx -= dt;
     this.applyMove(dt);
     this.updateElite(dt);
     this.updateSupport(dt);
