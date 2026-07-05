@@ -184,6 +184,11 @@ const Leaderboard = {
 
 const Challenge = {
   prefix: "SR2077-",
+  todayKey() {
+    const d = new Date(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
+    return String(d.getFullYear()) + m + day;
+  },
+  dailySeed() { return "DAILY-" + this.todayKey(); },
   randomSeed() {
     const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const n = Math.floor(Math.random() * 0x1000000).toString(36).toUpperCase().padStart(5, "0");
@@ -235,6 +240,26 @@ const Challenge = {
       return null;
     }
   },
+};
+
+const ChallengeHistory = {
+  key: "kzts_challenges", max: 8, _mem: [],
+  id(seed, ship) { return String(seed || "") + "|" + String(ship || "balanced"); },
+  load() { try { return JSON.parse(localStorage.getItem(this.key)) || []; } catch (e) { return this._mem; } },
+  saveList(list) { try { localStorage.setItem(this.key, JSON.stringify(list)); } catch (e) { this._mem = list; } },
+  best(seed, ship) { return this.load().find(r => r.id === this.id(seed, ship)) || null; },
+  submit(run) {
+    const list = this.load(), id = this.id(run.seed, run.ship), ts = new Date().toISOString();
+    let entry = list.find(r => r.id === id);
+    if (!entry) { entry = { id, seed: run.seed, ship: run.ship, score: 0, time: 0, combo: 0, attempts: 0, ts }; list.unshift(entry); }
+    entry.attempts = (entry.attempts || 0) + 1; entry.ts = ts; entry.lastScore = run.score; entry.lastTime = run.time;
+    entry.code = run.code || entry.code; entry.daily = !!run.daily;
+    if (run.score >= (entry.score || 0)) { entry.score = run.score; entry.time = run.time; entry.combo = run.combo; entry.date = ts.slice(0, 10); }
+    list.sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")));
+    this.saveList(list.slice(0, this.max));
+    return entry;
+  },
+  clearAll() { try { localStorage.removeItem(this.key); } catch (e) {} this._mem = []; },
 };
 
 // F:无尽模式独立排行榜
@@ -292,7 +317,7 @@ const Achievements = {
 // PP:存档导入导出 —— 单文件双击运行没有后端也没有文件下载习惯,用 window.prompt 展示/读取 JSON 文本最省事,
 // 复制粘贴即可备份/换设备,零依赖不用引入任何下载/剪贴板 API。
 const SaveData = {
-  keys: ["kzts_settings", "kzts_progress", "kzts_scores", "kzts_endless", "kzts_achievements"],
+  keys: ["kzts_settings", "kzts_progress", "kzts_scores", "kzts_endless", "kzts_challenges", "kzts_achievements"],
   exportAll() {
     const out = { _game: "skywardRaid2077", _v: 1 };
     for (const k of this.keys) { const v = localStorage.getItem(k); if (v != null) out[k] = v; }
