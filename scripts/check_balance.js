@@ -168,5 +168,8 @@ between(CONFIG.bonuses.clusterWarheads.maxCount, CONFIG.bonuses.clusterWarheads.
 game.bonuses = {}; assert.strictEqual(game.missileVolleyBonus(), 0, "missile route should not add volley before ready");
 game.bonuses = { missileRack: 3 }; assert.strictEqual(game.missileVolleyBonus(), 1, "missile route should add one missile when ready");
 assert(game.routeEffectText().includes("导弹+1"), "missile route resonance text should show the extra missile");
+game.bonuses = { missileRack: 2 };
+assert(game.routeProgressText().includes("/7"), "route progress should show resonance threshold");
+assert(game.routePreviewText(game.cardInfo("bonus:missileRack")).includes("解锁共鸣"), "draft route preview should show resonance unlock");
 
 console.log(`balance check passed: ${CONFIG.endless.events.length} events, ${affixes.length} boss affixes, ${CONFIG.bonusOrder.length} bonuses`);

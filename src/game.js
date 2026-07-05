@@ -622,6 +622,12 @@ const game = {
     const ready = this.buildRouteSummary(source).routes.filter(r => r.score >= 7).slice(0, limit).map(r => effects[r.name]);
     return ready.length ? ready.join(" / ") : "";
   },
+  routeProgressText(source = this.bonuses) {
+    const top = this.buildRouteSummary(source).top;
+    if (!top || top.score <= 0) return "路线 0/7";
+    const score = Math.min(top.score, 7), need = Math.max(0, 7 - top.score);
+    return top.name + " " + score + "/7" + (need ? " · 差" + need : " · 共鸣已启");
+  },
   endlessReviewTags(r) {
     const tele = r.telemetry || {}, time = Math.max(1, r.time || 1), routes = this.buildRouteSummary(r.bonuses || {}).routes;
     const ready = routes.filter(x => x.score >= 7).map(x => x.name).slice(0, 2), tags = [];
@@ -654,15 +660,17 @@ const game = {
     next[card.key] = (next[card.key] || 0) + 1;
     const before = this.buildRouteSummary(this.bonuses).routes;
     const gains = this.buildRouteSummary(next).routes.map(r => {
-      const old = before.find(b => b.name === r.name);
-      return Object.assign({ gain: r.score - (old ? old.score : 0) }, r);
+      const old = before.find(b => b.name === r.name), oldScore = old ? old.score : 0;
+      return Object.assign({ gain: r.score - oldScore, oldScore }, r);
     }).filter(r => r.gain > 0).sort((a, b) => b.gain - a.gain);
     const unlocked = gains.some(r => r.score >= 7 && r.score - r.gain < 7);
     return gains.length ? { top: gains[0], unlocked } : null;
   },
   routePreviewText(card) {
     const info = this.routePreviewInfo(card);
-    return info ? "路线 " + info.top.name + " +" + info.top.gain + (info.unlocked ? " · 解锁共鸣" : "") : "";
+    if (!info) return "";
+    const before = Math.min(info.top.oldScore, 7), after = Math.min(info.top.score, 7), need = Math.max(0, 7 - info.top.score);
+    return "路线 " + info.top.name + " " + before + "→" + after + "/7" + (info.unlocked ? " · 解锁共鸣" : need ? " · 差" + need : " · 共鸣已启");
   },
   chipRouteName(key) {
     return ({ laserFocus: "激光", chargeCore: "激光", homingSwarm: "追踪", missileBarrage: "导弹", capacitor: "生存", sideGuns: "主炮", volatileCore: "风险" })[key] || "";
@@ -1590,6 +1598,7 @@ const game = {
     ctx.fillStyle = route.top.color; ctx.font = "bold 13px 'Segoe UI', sans-serif"; ctx.fillText("路线 " + this.buildRouteText(), x + 94, y + 23);
     const effectText = this.routeEffectText(), eventBias = this.activeEventRouteBias();
     const meta = [];
+    meta.push(this.routeProgressText());
     if (effectText) meta.push("共鸣 " + effectText);
     if (eventBias) meta.push("空域偏向 " + eventBias + " 卡牌↑");
     if (meta.length) { ctx.fillStyle = "#adb5bd"; ctx.font = "12px 'Segoe UI', sans-serif"; ctx.fillText(meta.join(" · "), x + 16, y + 45); }
