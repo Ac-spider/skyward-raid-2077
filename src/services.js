@@ -48,31 +48,59 @@ const Sound = {
 };
 
 /* =====================================================================
- * 1.52) BGM(M)—— 用户提供的循环音乐
+ * 1.52) BGM(M)—— 用户提供的轮播音乐
  * ===================================================================== */
 const Music = {
-  src: "assets/audio/above-the-sprawl.mp3",
-  playing: false, enabled: true, volume: 0.8, gain: 0.55, track: null,
+  tracks: [
+    { src: "assets/audio/above-the-sprawl.mp3", title: "Above the Sprawl" },
+    { src: "assets/audio/skyward-raid-bgm-02.m4a", title: "Skyward Raid BGM 02" },
+  ],
+  index: 0, playing: false, enabled: true, volume: 0.8, gain: 0.55, fade: 2.2, track: null,
+  playPending: false, autoplayBlocked: false,
   init() {
     if (this.track || typeof Audio === "undefined") return;
-    this.track = new Audio(this.src);
-    this.track.loop = true; this.track.preload = "auto";
-    this.applyVolume();
+    this.load(this.index);
   },
-  applyVolume() { if (this.track) this.track.volume = this.enabled ? clamp(this.volume * this.gain, 0, 1) : 0; },
+  load(index, autoplay) {
+    if (typeof Audio === "undefined") return;
+    if (this.track) { this.track.pause(); this.track.onended = null; }
+    this.playPending = false; this.autoplayBlocked = false;
+    this.index = (index + this.tracks.length) % this.tracks.length;
+    this.track = new Audio(this.tracks[this.index].src);
+    this.track.loop = false; this.track.preload = "auto"; this.track.onended = () => this.next();
+    this.applyVolume();
+    if (autoplay) this.resume();
+  },
+  next() {
+    this.load(this.index + 1, this.playing && this.enabled && this.volume > 0);
+  },
+  envelope() {
+    if (!this.track || this.fade <= 0) return 1;
+    const t = this.track.currentTime || 0, d = this.track.duration, fadeIn = clamp(t / this.fade, 0, 1);
+    const fadeOut = Number.isFinite(d) ? clamp((d - t) / this.fade, 0, 1) : 1;
+    return Math.min(fadeIn, fadeOut);
+  },
+  applyVolume() { if (this.track) this.track.volume = this.enabled ? clamp(this.volume * this.gain * this.envelope(), 0, 1) : 0; },
   play() { this.playing = true; this.init(); this.applyVolume(); this.resume(); },
   stop() { this.playing = false; if (this.track) this.track.pause(); },
-  resume() {
+  resume(force) {
     if (!this.playing || !this.enabled || this.volume <= 0) return;
     this.init();
     if (!this.track) return;
+    if (this.playPending && !force) return;
+    if (force) this.playPending = false;
+    this.autoplayBlocked = false;
     const p = this.track.play();
-    if (p && p.catch) p.catch(() => {});
+    if (p && p.then) {
+      this.playPending = true;
+      p.then(() => { this.playPending = false; }).catch(() => { this.playPending = false; this.autoplayBlocked = true; });
+    }
   },
   update() {
+    this.init();
     this.applyVolume();
     if (!this.playing || !this.enabled || this.volume <= 0) { if (this.track && !this.track.paused) this.track.pause(); return; }
-    if (this.track && this.track.paused) this.resume();
+    if (this.track && this.track.paused && !this.autoplayBlocked) this.resume();
   },
 };
 

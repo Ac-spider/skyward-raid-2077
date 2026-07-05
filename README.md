@@ -29,7 +29,7 @@
 ## 当前方向
 
 - 画面:持续增强 Canvas 绘制质感，不引入重型渲染框架。
-- 音乐:主菜单和对局使用 `assets/audio/above-the-sprawl.mp3` 循环播放。
+- 音乐:主菜单和对局轮播 `assets/audio/above-the-sprawl.mp3` 与 `assets/audio/skyward-raid-bgm-02.m4a`，播放时自动淡入淡出。
 - 音效:射击、爆炸、道具等即时反馈仍使用 WebAudio 合成，后续可替换或叠加 CC0/免版税素材。
 - 武器:普通弹已扩展为追踪弹、激光、导弹和火力超载。
 - 内容:继续补敌机、Boss、关卡节奏和无尽模式成长曲线。
@@ -46,4 +46,4 @@ git push -u origin main
 
 不要把个人访问令牌写进命令、远程 URL 或文件。使用 Git Credential Manager 或 GitHub CLI 登录。
 
-公开发布前请确认 `assets/audio/above-the-sprawl.mp3` 的授权允许公开分发。
+公开发布前请确认 `assets/audio/` 下 BGM 的授权允许公开分发。

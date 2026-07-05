@@ -1,12 +1,13 @@
 # Audio Sources
 
-当前版本使用一首外部 MP3 做循环 BGM；射击、爆炸、道具等即时音效仍使用 `src/services.js` 里的 WebAudio 合成。
+当前版本使用两首外部音频做轮播 BGM，淡入淡出由 `src/services.js` 在播放时处理；射击、爆炸、道具等即时音效仍使用 WebAudio 合成。
 
 后续替换为素材时，只使用许可清楚的来源，并在本文件记录:
 
 | File | Source URL | Author | License | Notes |
 | --- | --- | --- | --- | --- |
-| `assets/audio/above-the-sprawl.mp3` | User-provided local file: `C:/Users/liu_j/Downloads/Above_the_Sprawl.mp3` | Unknown | User-provided; confirm before public release | Main menu and gameplay BGM; trimmed about 2s from start and end |
+| `assets/audio/above-the-sprawl.mp3` | User-provided local file: `C:/Users/liu_j/Downloads/Above_the_Sprawl.mp3` | Unknown | User-provided; confirm before public release | BGM track 1; trimmed about 2s from start and end |
+| `assets/audio/skyward-raid-bgm-02.m4a` | User-provided local file: `C:/Users/liu_j/Downloads/Video Project 6.m4a` | Unknown | User-provided; confirm before public release | BGM track 2; renamed for project use |
 
 推荐优先级:
 
