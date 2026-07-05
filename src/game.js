@@ -831,6 +831,10 @@ const game = {
   },
   jamFactor(x, y) {
     let slow = 1;
+    if (this.boss && !this.boss.dead && this.boss.affix && this.boss.affix.jamRadius) {
+      const a = this.boss.affix, dx = this.boss.x - x, dy = this.boss.y - y, r = a.jamRadius;
+      if (dx * dx + dy * dy <= r * r) slow = Math.max(slow, a.weaponSlow || 1);
+    }
     for (const e of this.enemies) {
       if (e.dead || e.type !== "jammer" || e.y < -e.radius) continue;
       const r = e.cfg.jamRadius || 0, dx = e.x - x, dy = e.y - y;
