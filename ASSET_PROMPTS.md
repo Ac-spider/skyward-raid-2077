@@ -1,10 +1,10 @@
-# Art Asset Prompts
+# 美术素材提示词
 
-本文档用于生成《空中突袭 2077》的美术素材。当前游戏是竖屏 Canvas 空战，画布比例 `9:16`，逻辑尺寸 `540x960`。建议生成更高清的 `1080x1920`，再交给我裁切、压缩和接入。
+这份文档用于生成《空中突袭 2077》的图片素材。当前游戏是竖屏 Canvas 空战，逻辑画布比例是 `9:16`，推荐背景生成 `1080x1920`，战机/敌机生成透明 PNG。
 
 ## 通用风格
 
-核心风格:
+核心风格可以追加到所有提示词后面:
 
 ```text
 top-down vertical scrolling sci-fi arcade shooter game art, readable silhouettes, polished semi-realistic 2D digital painting, clean shapes, crisp edges, luminous energy accents, metal panels, high contrast, no text, no logo, no UI
@@ -13,39 +13,39 @@ top-down vertical scrolling sci-fi arcade shooter game art, readable silhouettes
 通用负面提示词:
 
 ```text
-text, logo, watermark, UI, cockpit view, side view, first person view, blurry, noisy, low resolution, cropped subject, cut off wings, photorealistic aircraft photo, messy background behind sprite, asymmetric accidental deformation
+text, logo, watermark, UI, cockpit view, side view, first person view, blurry, noisy, low resolution, cropped subject, cut off wings, photorealistic aircraft photo, messy background behind sprite, accidental asymmetry
 ```
 
 透明素材通用要求:
 
 ```text
-isolated object, transparent background, centered, full body visible, top-down view, nose pointing up, game sprite, clean alpha edge, 20 percent padding around the object, no cast shadow outside the object
+isolated object, transparent background, centered, full body visible, top-down view, game sprite, clean alpha edge, 20 percent padding around the object, no cast shadow outside the object
 ```
 
-如果你的生成工具不支持透明背景，就用纯色背景:
+如果你的生成工具不支持透明背景，就用纯绿背景，后面我可以抠图:
 
 ```text
 isolated object on a flat pure green background (#00ff00), no shadow, no glow touching the background
 ```
 
-## 我能不能自动抠图
+## 抠图说明
 
-可以。你给我 PNG/JPG 后，我可以做这些处理:
+方便。你给我 PNG/JPG 后，我可以做这些处理:
 
-- 把纯色背景、浅色背景或复杂背景抠成透明 PNG。
-- 裁切到紧贴主体但保留统一留白。
-- 统一尺寸，比如玩家机 `512x512`、普通敌机 `256x256`、Boss `768x768`。
-- 检查透明边缘、黑边、白边和残留背景。
-- 后续把图片接入 Canvas，并保留代码图形作为失败兜底。
+- 把纯色背景、浅色背景或相对复杂的背景抠成透明 PNG。
+- 裁切到主体附近，同时保留统一留白。
+- 统一尺寸，例如玩家机 `512x512`，普通敌机 `256x256`，Boss `768x768` 或 `1024x1024`。
+- 检查透明边缘、白边、黑边、残留背景。
+- 接入 `src/assets.js`，并保留 Canvas 绘制作为加载失败兜底。
 
 为了抠图更干净，生成时尽量做到:
 
 - 主体和背景颜色对比强。
-- 不要让尾焰、发光、烟雾贴住背景边缘。
-- 不要生成投影落在地面上。
-- 不要把多个单位放在同一张图里，除非明确要做 spritesheet。
+- 不要让尾焰、烟雾、外发光贴住背景边缘。
+- 不要生成落在地面上的投影。
+- 一张图只放一个单位，除非明确要做 spritesheet。
 
-## 交付命名建议
+## 文件命名
 
 先按这些名字给我最省事:
 
@@ -63,17 +63,17 @@ assets/images/enemies/enemy-large.png
 assets/images/bosses/boss-01-guard.png
 ```
 
-## 背景生成规则
+## 背景规则
 
-背景建议拆成三层:
+每个世界建议拆成三层:
 
-- `base`: 不透明底图，尺寸 `1080x1920`，负责世界气氛。
-- `mid`: 透明 PNG，尺寸 `1080x1920`，中景云层、平台、舰队影子、地貌块，用于慢速视差。
-- `fg`: 透明 PNG，尺寸 `1080x1920`，高速线条、碎片、近景光带，用于快速视差。
+- `base`: 不透明底图，`1080x1920`，负责世界气氛。
+- `mid`: 透明 PNG，`1080x1920`，中景云层、平台、地貌块，用于慢速视差。
+- `fg`: 透明 PNG，`1080x1920`，高速线条、碎片、近景光带，用于快速视差。
 
-背景不要有太强的地平线。这个游戏是俯视卷轴，不是横版飞行。
+背景不要有太强的地平线。游戏是俯视卷轴，不是横版飞行。
 
-## 世界 1: 近海突破
+### 世界 1: 近海突破
 
 底图:
 
@@ -93,7 +93,7 @@ transparent PNG parallax layer for a vertical shooter, floating offshore platfor
 transparent PNG foreground speed layer, thin rain-like speed streaks, small blue light particles, subtle mist trails, vertical motion feeling, sparse and readable, no text, no UI
 ```
 
-## 世界 2: 大漠强袭
+### 世界 2: 大漠强袭
 
 底图:
 
@@ -113,7 +113,7 @@ transparent PNG parallax layer, desert dust clouds, half-buried metal platforms,
 transparent PNG foreground speed layer, fast sand particles, amber streaks, tiny debris fragments, sparse enough for gameplay readability, no text, no UI
 ```
 
-## 世界 3: 夜空决战
+### 世界 3: 夜空决战
 
 底图:
 
@@ -133,7 +133,7 @@ transparent PNG parallax layer, purple storm clouds, distant drone silhouettes, 
 transparent PNG foreground speed layer, blue violet speed streaks, tiny sparks, electric particles, sparse, crisp, no text, no UI
 ```
 
-## 世界 4: 深渊禁地
+### 世界 4: 深渊禁地
 
 底图:
 
@@ -153,7 +153,7 @@ transparent PNG parallax layer, jagged alien metal plates, red fog bands, green 
 transparent PNG foreground speed layer, crimson streaks, green embers, small black debris, sparse and readable, no text, no UI
 ```
 
-## 世界 5: 虚空回廊
+### 世界 5: 虚空回廊
 
 底图:
 
@@ -175,7 +175,7 @@ transparent PNG foreground speed layer, violet speed lines, star particles, smal
 
 ## 玩家战机
 
-玩家机生成尺寸建议 `512x512`，透明 PNG。四种机型要共享同一美术语言，但剪影明显不同。
+建议尺寸 `512x512`，透明 PNG，机头朝上。
 
 平衡型:
 
@@ -203,7 +203,7 @@ top-down player spaceship sprite, nose pointing up, fast scout interceptor, yell
 
 ## 普通敌机
 
-普通敌机建议 `256x256`，透明 PNG，全部朝下或朝玩家方向。为了接入简单，先统一画成“机头朝下”的敌机。
+建议尺寸 `256x256`，透明 PNG，机头朝下。
 
 小型机:
 
@@ -261,7 +261,7 @@ top-down enemy carrier aircraft sprite, nose pointing down, purple armored mini 
 
 ## Boss
 
-Boss 建议 `768x768` 或 `1024x1024`，透明 PNG。Boss 可以有更多细节，但剪影必须清楚。
+建议尺寸 `768x768` 或 `1024x1024`，透明 PNG，机头朝下。
 
 近卫舰:
 
@@ -293,9 +293,9 @@ top-down boss spaceship sprite, abyss king biomechanical star-shaped warship, bl
 top-down final boss spaceship sprite, octagonal void devourer fortress, black purple armor, cosmic energy core, geometric armor plates, sinister elegant silhouette, transparent background, centered, full body visible, 1024x1024, no text, no UI
 ```
 
-## 子弹、导弹和特效
+## 子弹和特效
 
-这些可以先不生成，Canvas 代码画出来已经够用。后续如果要换成图片，优先生成小型 spritesheet。
+这些可以先不生成，Canvas 绘制已经够用。后续如果要替换成图片，优先生成小 spritesheet。
 
 导弹:
 
@@ -315,20 +315,20 @@ transparent PNG game VFX sprite, blue white laser impact burst, circular sparks,
 sprite sheet, 4 columns 4 rows, arcade sci-fi explosion animation, orange yellow fireball with smoke, transparent background, consistent centered frames, no text, no UI
 ```
 
-## 首批优先级
+## 第一批优先级
 
-建议第一批只生成这些，先验证接入质量:
+第一批建议只生成这些:
 
 1. 五个 `base` 背景。
 2. 五个 `mid` 透明视差层。
-3. 四架玩家机。
-4. 三个基础敌机: 小型机、中型机、大型机。
+3. 四架玩家战机。
+4. 三个基础敌机:小型机、中型机、大型机。
 
-这批完成后，再补 Boss 和更多敌机。这样可以最快把整体观感拉起来，同时不让素材管理一开始就变重。
+这批完成后，再补 Boss 和更多敌机。这样最快提升整体观感，也不会一开始就把素材管理做重。
 
-## 接入到游戏
+## 接入方式
 
-图片素材接入点在 `src/assets.js`。游戏只会加载清单中登记的图片，所以现在没有素材时不会产生 404，也不会影响直接打开 HTML。
+图片素材登记点在 `src/assets.js`。游戏只加载清单中登记的图片，所以现在没有素材时不会产生 404，也不影响直接打开 HTML。
 
 登记示例:
 
@@ -353,7 +353,7 @@ manifest: {
 }
 ```
 
-当前已支持图片兜底:
+当前支持:
 
 - 五个世界背景的 `base / mid / fg` 三层视差图。
 - 玩家机型选择页和游戏内玩家机体。

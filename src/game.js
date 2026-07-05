@@ -1296,6 +1296,39 @@ const game = {
     }
     ctx.restore();
   },
+  drawSecondaryWeaponIcon(ctx, x, y, r, type, color) {
+    const s = r * 0.5;
+    ctx.save(); ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    if (type === "homing") {
+      ctx.beginPath(); ctx.moveTo(x - s * 0.75, y + s * 0.5); ctx.quadraticCurveTo(x - s * 0.15, y - s * 0.9, x + s * 0.55, y - s * 0.2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + s * 0.55, y - s * 0.2); ctx.lineTo(x + s * 0.15, y - s * 0.18); ctx.moveTo(x + s * 0.55, y - s * 0.2); ctx.lineTo(x + s * 0.5, y + s * 0.2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x - s * 0.78, y + s * 0.56, s * 0.13, 0, Math.PI * 2); ctx.fill();
+    } else if (type === "laser") {
+      ctx.fillRect(x - s * 0.16, y - s, s * 0.32, s * 2);
+      ctx.beginPath(); ctx.moveTo(x, y - s * 1.15); ctx.lineTo(x - s * 0.38, y - s * 0.55); ctx.lineTo(x + s * 0.38, y - s * 0.55); ctx.closePath(); ctx.fill();
+    } else {
+      ctx.beginPath(); ctx.moveTo(x, y - s * 1.05); ctx.lineTo(x + s * 0.42, y + s * 0.55); ctx.lineTo(x, y + s * 0.35); ctx.lineTo(x - s * 0.42, y + s * 0.55); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x - s * 0.52, y + s * 0.15); ctx.lineTo(x - s * 0.88, y + s * 0.75); ctx.moveTo(x + s * 0.52, y + s * 0.15); ctx.lineTo(x + s * 0.88, y + s * 0.75); ctx.stroke();
+    }
+    ctx.restore();
+  },
+  drawSecondaryHUD(ctx) {
+    const p = this.player, s = CONFIG.secondary, oc = p.overcharge || 0;
+    const items = [
+      { type: "homing", need: s.homingPower, timer: p._homingTimer, interval: Math.max(0.32, s.homingInterval - oc * 0.05), color: "#74c0fc" },
+      { type: "laser", need: s.laserPower, timer: p._laserTimer, interval: Math.max(0.55, s.laserInterval - oc * 0.06), color: "#cc5de8" },
+      { type: "missile", need: s.missilePower, timer: p._missileTimer, interval: Math.max(0.75, s.missileInterval - oc * 0.04), color: "#ff922b" },
+    ];
+    const y = 160, r = 16, gap = 44;
+    items.forEach((it, i) => {
+      const x = 32 + i * gap, unlocked = p.power >= it.need, ready = unlocked && it.timer <= 0;
+      const ratio = unlocked ? 1 - clamp(it.timer / it.interval, 0, 1) : 0;
+      UI.roundButton(ctx, x, y, r, ready ? it.color : "#495057", { alpha: unlocked ? (ready ? 0.85 : 0.55) : 0.28, lineWidth: 1.5, stroke: ready ? UI.rgba(it.color, 0.85) : "rgba(255,255,255,.25)" });
+      this.drawSecondaryWeaponIcon(ctx, x, y, r * 0.85, it.type, unlocked ? "#fff" : "#adb5bd");
+      if (unlocked && !ready) UI.bar(ctx, x - r, y + r + 6, r * 2, 5, ratio, "#868e96", it.color, {});
+      if (!unlocked) this.drawCountBadge(ctx, x + r * 0.62, y - r * 0.62, it.need, "#495057");
+    });
+  },
   // X6:火力等级图标——两道叠放的上箭头("升级/增幅"的通用视觉语言),配合 drawCountBadge 显示具体等级数字
   drawPowerIcon(ctx, x, y, r) {
     const s = r * 0.5;
@@ -1365,6 +1398,7 @@ const game = {
     // X4:就绪时显示机型专属技能名字(而不是统一的"机型技能"),呼应四种机型四套不同效果
     const specName = this.player.ship.specialName || "机型技能";
     ctx.fillStyle = enFull ? "#ffd43b" : "#adb5bd"; ctx.font = "bold 12px 'Segoe UI', sans-serif"; ctx.fillText(enFull ? specName + " · 就绪" : "机型技能", enX, enY + enH + 14);
+    this.drawSecondaryHUD(ctx);
 
     // BOSS 血条 —— 渐变发光 + 阶段分隔刻度 + 狂暴提示
     if (this.boss) {
