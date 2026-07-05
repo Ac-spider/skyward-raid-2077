@@ -496,13 +496,28 @@ class Boss {
 }
 
 class PowerUp {
-  constructor(x, y, kind) { this.x = x; this.y = y; this.kind = kind; this.radius = CONFIG.powerup.radius; this.dead = false; }
-  update(dt) { this.y += CONFIG.powerup.speed * dt; if (this.y > CONFIG.HEIGHT + this.radius) this.dead = true; }
+  constructor(x, y, kind) { this.x = x; this.y = y; this.kind = kind; this.radius = CONFIG.powerup.radius; this.dead = false; this._magnet = false; }
+  update(dt) {
+    this.y += CONFIG.powerup.speed * dt; this._magnet = false;
+    if (game.player) {
+      const dx = game.player.x - this.x, dy = game.player.y - this.y, d = Math.hypot(dx, dy), mr = CONFIG.powerup.magnetRadius;
+      if (d > 1 && d < mr) {
+        const step = Math.min(d, CONFIG.powerup.magnetSpeed * (1.25 - d / mr) * dt);
+        this.x += dx / d * step; this.y += dy / d * step; this._magnet = true;
+      }
+    }
+    if (this.y > CONFIG.HEIGHT + this.radius) this.dead = true;
+  }
   draw(ctx) {
     const x = this.x, y = this.y, r = this.radius;
     const bg = { heal: "#e03131", power: "#2f9e44", bomb: "#5f3dc4", wing: "#495057" }[this.kind];
     const pulse = 0.78 + Math.sin(game.titleT * 6 + x * 0.03) * 0.12;
     ctx.save();
+    if (this._magnet) {
+      ctx.globalAlpha = 0.28 + pulse * 0.22; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(x, y, r + 7 + pulse * 3, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     ctx.shadowColor = bg; ctx.shadowBlur = 12 * pulse;
     const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, 2, x, y, r * 1.4);
     g.addColorStop(0, UI.shade(bg, 0.55)); g.addColorStop(0.65, bg); g.addColorStop(1, UI.shade(bg, -0.45));

@@ -515,7 +515,10 @@ const game = {
           const wasMax = this.player.power >= CONFIG.player.maxPower;
           this.player.addPower();
           if (wasMax) this.floats.push(new FloatText(this.player.x, this.player.y - 34, "过载 +" + this.player.overcharge, "#74c0fc"));
-        } else if (p.kind === "bomb") this.player.addBomb(); else if (p.kind === "wing") this.player.addWing(); else this.player.heal(CONFIG.powerup.healAmount);
+          else this.floats.push(new FloatText(this.player.x, this.player.y - 34, "火力 +1", "#38d9a9"));
+        } else if (p.kind === "bomb") { this.player.addBomb(); this.floats.push(new FloatText(this.player.x, this.player.y - 34, "炸弹 +1", "#cc5de8")); }
+        else if (p.kind === "wing") { this.player.addWing(); this.floats.push(new FloatText(this.player.x, this.player.y - 34, "僚机 +1", "#dee2e6")); }
+        else { this.player.heal(CONFIG.powerup.healAmount); this.floats.push(new FloatText(this.player.x, this.player.y - 34, "HP +" + CONFIG.powerup.healAmount, "#ff8787")); }
       }
     }
   },
