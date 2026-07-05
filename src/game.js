@@ -538,12 +538,12 @@ const game = {
   },
   buildRouteSummary(source = this.bonuses) {
     const routes = [
-      { name: "主炮", color: "#ffd43b", weights: { damage: 1, fireRate: 1, pierce: 2, kineticAmmo: 2, chainSpark: 1, executioner: 1, glassCannon: 1, overdrive: 1 } },
+      { name: "主炮", color: "#ffd43b", weights: { damage: 1, fireRate: 1, pierce: 2, kineticAmmo: 2, chainSpark: 1, pointDefense: 1, executioner: 1, glassCannon: 1, overdrive: 1 } },
       { name: "激光", color: "#cc5de8", weights: { damage: 1, range: 1, laserLens: 3, chargeAmp: 1, bossHunter: 1, glassCannon: 1 } },
-      { name: "追踪", color: "#4dabf7", weights: { range: 1, fireRate: 1, swarmCore: 3, magnetCore: 1, comboBattery: 1 } },
-      { name: "导弹", color: "#ff922b", weights: { missileRack: 3, explosivePayload: 3, fireRate: 1, range: 1, bossHunter: 1 } },
-      { name: "生存", color: "#38d9a9", weights: { maxHp: 2, leech: 2, salvage: 2, reactiveArmor: 2, emergencyBarrier: 3, magnetCore: 1 } },
-      { name: "风险", color: "#ff6b6b", weights: { glassCannon: 3, overdrive: 3, adrenaline: 3, executioner: 1, bossHunter: 1 } },
+      { name: "追踪", color: "#4dabf7", weights: { range: 1, fireRate: 1, swarmCore: 3, homingShards: 3, magnetCore: 1, comboBattery: 1, comboSurge: 1 } },
+      { name: "导弹", color: "#ff922b", weights: { missileRack: 3, explosivePayload: 3, missileInterceptor: 2, fireRate: 1, range: 1, bossHunter: 1 } },
+      { name: "生存", color: "#38d9a9", weights: { maxHp: 2, leech: 2, salvage: 2, reactiveArmor: 2, emergencyBarrier: 3, magnetCore: 1, pointDefense: 2, missileInterceptor: 1 } },
+      { name: "风险", color: "#ff6b6b", weights: { glassCannon: 3, overdrive: 3, adrenaline: 3, comboSurge: 2, executioner: 1, bossHunter: 1 } },
     ].map(r => {
       const score = Object.keys(r.weights).reduce((sum, key) => sum + (source[key] || 0) * r.weights[key], 0);
       const stage = score >= 7 ? "成型" : score >= 3 ? "偏向" : "起步";
@@ -671,6 +671,43 @@ const game = {
     this.spawnShockwave(target.x, target.y, target.radius * 1.4, cfg.color);
     this.floats.push(new FloatText(target.x, target.y - target.radius, "电弧 -" + Math.round(dmg), cfg.color));
     if (target.damage(dmg)) this.onEnemyKilled(target);
+  },
+  clearEnemyBulletsNear(x, y, range, color, label) {
+    let n = 0;
+    for (const b of this.enemyBullets) {
+      if (b.dead) continue;
+      const dx = b.x - x, dy = b.y - y;
+      if (dx * dx + dy * dy > range * range) continue;
+      b.dead = true; n++;
+      if (n <= 5) this.burst(b.x, b.y, color, 3, 100);
+    }
+    if (!n) return 0;
+    this.spawnShockwave(x, y, range, color);
+    this.floats.push(new FloatText(x, y - 22, label + " -" + n, color));
+    return n;
+  },
+  triggerPointDefense(src) {
+    const stacks = this.bonusStacks("pointDefense");
+    if (!stacks) return;
+    const cfg = CONFIG.bonuses.pointDefense;
+    this.clearEnemyBulletsNear(src.x, src.y, cfg.range + stacks * 26, cfg.color, "近防");
+  },
+  triggerHomingShards(src, baseDamage) {
+    const stacks = this.bonusStacks("homingShards");
+    if (!stacks) return;
+    const cfg = CONFIG.bonuses.homingShards, range = cfg.range + stacks * 18;
+    this.spawnShockwave(src.x, src.y, range, cfg.color);
+    for (const e of this.enemies) {
+      if (e.dead || e === src) continue;
+      const dx = e.x - src.x, dy = e.y - src.y, rr = range + e.radius;
+      if (dx * dx + dy * dy <= rr * rr && e.damage(this.playerDamage(cfg.damage * stacks + baseDamage * 0.25, e))) this.onEnemyKilled(e);
+    }
+  },
+  triggerMissileInterceptor(src, range) {
+    const stacks = this.bonusStacks("missileInterceptor");
+    if (!stacks) return;
+    const cfg = CONFIG.bonuses.missileInterceptor;
+    this.clearEnemyBulletsNear(src.x, src.y, range * (cfg.rangeMult + stacks * 0.08), cfg.color, "拦截");
   },
   triggerReactiveArmor(src) {
     const stacks = this.bonusStacks("reactiveArmor");
@@ -947,7 +984,7 @@ const game = {
     }
     if (e.isBoss) { for (let k = 0; k < 5; k++) this.burst(e.x + (Math.random() - 0.5) * e.radius, e.y + (Math.random() - 0.5) * e.radius, ["#ffd43b", "#ff922b", "#fff"][k % 3], 18, 260); this.spawnShockwave(e.x, e.y, e.radius * 3, "#ffd43b"); this.flashTimer = Math.max(this.flashTimer, 0.4); Sound.bossDefeat(); Haptics.bossDefeat(); this.addShake(9, 0.32); this.hitStop(0.08); Achievements.trackBossKill(e.defIndex); }
     else { this.burst(e.x, e.y, e.color, 14, 180); this.spawnShockwave(e.x, e.y, e.radius * 2.2, e.color); Sound.explosion(e.radius >= 30 ? "large" : e.radius >= 20 ? "medium" : "small"); if (allowDrop) this.maybeDrop(e.type, e.x, e.y); }
-    if (!byBomb) this.triggerChainSpark(e);
+    if (!byBomb) { this.triggerPointDefense(e); this.triggerChainSpark(e); }
     // CC:连击每达 10 的倍数,弹一次居中大字里程碑特效
     if (!byBomb && this.combo > 0 && this.combo % 10 === 0) this.comboMilestone(this.combo);
   },
@@ -959,6 +996,11 @@ const game = {
       this.player.addEnergy(cfg.energy * stacks);
       this.player.grantShield(Math.min(48, this.player.shieldHp + cfg.shield * stacks), cfg.dur);
       this.floats.push(new FloatText(this.player.x, this.player.y - 58, "连击电池", cfg.color));
+    }
+    const surge = this.bonusStacks("comboSurge"), sc = CONFIG.bonuses.comboSurge;
+    if (surge && this.player) {
+      this.player.overcharge = clamp(this.player.overcharge + sc.overcharge * surge, 0, CONFIG.player.maxOvercharge);
+      this.floats.push(new FloatText(this.player.x, this.player.y - 74, "连击涡轮 +" + surge, sc.color));
     }
     Sound.powerup();
   },
@@ -1083,7 +1125,7 @@ const game = {
     }
     for (const b of this.homingShots) {
       if (b.dead) continue;
-      for (const e of this.enemies) { if (e.dead) continue; if (hit(b, e)) { b.dead = true; this.spawnHitSpark(b.x, b.y); if (e.damage(this.playerDamage(b.damage, e))) this.onEnemyKilled(e); break; } }
+      for (const e of this.enemies) { if (e.dead) continue; if (hit(b, e)) { b.dead = true; this.spawnHitSpark(b.x, b.y); const killed = e.damage(this.playerDamage(b.damage, e)); this.triggerHomingShards(e, b.damage); if (killed) this.onEnemyKilled(e); break; } }
     }
     for (const m of this.missiles) {
       if (m.dead) continue;
@@ -1092,6 +1134,7 @@ const game = {
         if (!hit(m, e)) continue;
         m.dead = true; this.burst(m.x, m.y, "#ff922b", 12, 190); this.spawnShockwave(m.x, m.y, m.splash, "#ff922b");
         Sound.missileHit();
+        this.triggerMissileInterceptor(m, m.splash);
         const missileDmg = this.playerDamage(m.damage, e);
         if (e.damage(missileDmg)) this.onEnemyKilled(e);
         const splashDmg = Math.max(1, Math.round(m.damage * 0.45));
@@ -1237,8 +1280,8 @@ const game = {
     if (key.includes("missile") || key.includes("Payload")) this.drawSecondaryWeaponIcon(ctx, x, y, r * .9, "missile", "#fff");
     else if (key.includes("laser") || key.includes("Lens")) this.drawSecondaryWeaponIcon(ctx, x, y, r * .9, "laser", "#fff");
     else if (key.includes("homing") || key.includes("swarm")) this.drawSecondaryWeaponIcon(ctx, x, y, r * .9, "homing", "#fff");
-    else if (key.includes("shield") || key.includes("Armor") || key.includes("salvage") || key.includes("Barrier") || key === "capacitor") this.drawSpecialIcon(ctx, x, y, r * .86, "shield", "#fff");
-    else if (key.includes("charge") || key.includes("overdrive") || key.includes("Battery") || key.includes("fireRate")) this.drawChargeIcon(ctx, x, y, r * .9, "#fff");
+    else if (key.includes("shield") || key.includes("Armor") || key.includes("Defense") || key.includes("salvage") || key.includes("Barrier") || key === "capacitor") this.drawSpecialIcon(ctx, x, y, r * .86, "shield", "#fff");
+    else if (key.includes("charge") || key.includes("overdrive") || key.includes("Battery") || key.includes("Surge") || key.includes("fireRate")) this.drawChargeIcon(ctx, x, y, r * .9, "#fff");
     else if (key.includes("range") || key.includes("magnet")) {
       ctx.save(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; for (let i = 1; i <= 3; i++) { ctx.globalAlpha = 1 - i * .18; ctx.beginPath(); ctx.arc(x, y, r * (.22 + i * .18), 0, Math.PI * 2); ctx.stroke(); } ctx.restore();
     } else if (key.includes("chain")) {
