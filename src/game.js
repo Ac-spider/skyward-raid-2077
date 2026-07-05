@@ -959,9 +959,16 @@ const game = {
       if (dx * dx + dy * dy <= r * r) slow = Math.max(slow, a.weaponSlow || 1);
     }
     for (const e of this.enemies) {
-      if (e.dead || e.type !== "jammer" || e.y < -e.radius) continue;
-      const r = e.cfg.jamRadius || 0, dx = e.x - x, dy = e.y - y;
-      if (dx * dx + dy * dy <= r * r) slow = Math.max(slow, e.cfg.weaponSlow || 1);
+      if (e.dead || e.y < -e.radius) continue;
+      const dx = e.x - x, dy = e.y - y;
+      if (e.type === "jammer") {
+        const r = e.cfg.jamRadius || 0;
+        if (dx * dx + dy * dy <= r * r) slow = Math.max(slow, e.cfg.weaponSlow || 1);
+      }
+      if (e.eliteCfg && e.eliteCfg.jamRadius) {
+        const r = e.eliteCfg.jamRadius;
+        if (dx * dx + dy * dy <= r * r) slow = Math.max(slow, e.eliteCfg.weaponSlow || 1);
+      }
     }
     return slow;
   },

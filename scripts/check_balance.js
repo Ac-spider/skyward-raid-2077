@@ -28,7 +28,8 @@ between(CONFIG.endless.boss.interval, 25, 55, "boss interval");
 const enemyKeys = new Set(Object.keys(CONFIG.enemy));
 const eliteTypes = CONFIG.elite.types || [];
 unique(eliteTypes, "elite types");
-assert(eliteTypes.length >= 4, "elite type variety should include at least 4 types");
+assert(eliteTypes.length >= 5, "elite type variety should include at least 5 types");
+assert(eliteTypes.includes("jammer"), "elite type variety should include jammer");
 for (const key of eliteTypes) {
   const e = CONFIG.elite[key];
   assert(e && e.name && e.color, `elite ${key} needs readable text`);
@@ -37,7 +38,12 @@ for (const key of eliteTypes) {
   if (e.fireMult) between(e.fireMult, 0.6, 1, `elite ${key} fireMult`);
   if (e.regenEvery) between(e.regenEvery, 1.5, 4, `elite ${key} regenEvery`);
   if (e.regenPct) between(e.regenPct, 0.03, 0.12, `elite ${key} regenPct`);
+  if (e.jamRadius) between(e.jamRadius, 140, 280, `elite ${key} jamRadius`);
+  if (e.weaponSlow) between(e.weaponSlow, 1.05, 1.4, `elite ${key} weaponSlow`);
 }
+game.boss = null; game.enemies = [{ dead: false, x: 100, y: 100, radius: 20, type: "medium", eliteCfg: CONFIG.elite.jammer }];
+assert(game.jamFactor(100, 100) > 1, "jammer elite should slow weapons in range");
+assert.strictEqual(game.jamFactor(500, 100), 1, "jammer elite should not slow weapons out of range");
 for (const [i, pool] of CONFIG.endless.pools.entries()) {
   assert(pool.enemies && pool.enemies.length, `endless pool ${i} is empty`);
   for (const type of pool.enemies) assert(enemyKeys.has(type), `pool ${i} references missing enemy ${type}`);

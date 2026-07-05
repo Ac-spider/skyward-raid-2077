@@ -583,6 +583,11 @@ class Enemy {
       ctx.strokeStyle = c; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(game.player.x, game.player.y); ctx.stroke();
     }
+    if (this.eliteCfg.jamRadius) {
+      ctx.globalAlpha = 0.10 + 0.06 * Math.sin(this._mt * 6) ** 2;
+      ctx.strokeStyle = c; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(x, y, this.eliteCfg.jamRadius, 0, Math.PI * 2); ctx.stroke();
+    }
     ctx.restore();
   }
 }
