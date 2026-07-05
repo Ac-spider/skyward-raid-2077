@@ -678,8 +678,10 @@ const game = {
   draftEventBiasText(card) {
     const bias = this.activeEventRouteBias();
     if (!bias || !card) return "";
-    const route = card.type === "chip" ? this.chipRouteName(card.key) : ((this.routePreviewInfo(card) || {}).top || {}).name;
-    return route === bias ? "空域推荐" : "";
+    return this.draftCardRoute(card) === bias ? "空域推荐" : "";
+  },
+  draftCardRoute(card) {
+    return !card ? "" : card.type === "chip" ? this.chipRouteName(card.key) : ((this.routePreviewInfo(card) || {}).top || {}).name || "";
   },
   bonusDraftLimit(key) {
     const b = CONFIG.bonuses[key];
@@ -708,8 +710,8 @@ const game = {
     const info = this.routePreviewInfo(card), top = this.buildRouteSummary().top;
     if (info && info.unlocked) w *= 1.65;
     else if (info && top.score >= 3 && info.top.name === top.name) w *= 1.35;
-    const eventBias = this.activeEventRouteBias(), cardRoute = card.type === "chip" ? this.chipRouteName(card.key) : (info && info.top.name);
-    if (eventBias && cardRoute === eventBias) w *= 1.55;
+    const eventBias = this.activeEventRouteBias();
+    if (eventBias && this.draftCardRoute(card) === eventBias) w *= 1.55;
     return w;
   },
   chipChoiceRect(i) { return { x: 40, y: 238 + i * 104, w: CONFIG.WIDTH - 80, h: 92 }; },
@@ -726,6 +728,12 @@ const game = {
     const skip = new Set(exclude);
     const pool = CONFIG.chipOrder.map(k => "chip:" + k).concat(CONFIG.bonusOrder.map(k => "bonus:" + k)).filter(id => !skip.has(id) && this.canDraftCard(id));
     this._chipChoices = [];
+    const bias = this.activeEventRouteBias(), biased = bias ? pool.filter(id => this.draftCardRoute(this.cardInfo(id)) === bias) : [];
+    if (biased.length) {
+      let r = this.rng() * biased.reduce((s, id) => s + this.draftCardWeight(id), 0), pick = biased[0];
+      for (const id of biased) { r -= this.draftCardWeight(id); if (r <= 0) { pick = id; break; } }
+      this._chipChoices.push(pick); pool.splice(pool.indexOf(pick), 1);
+    }
     while (this._chipChoices.length < 3 && pool.length) {
       const total = pool.reduce((s, id) => s + this.draftCardWeight(id), 0);
       if (total <= 0) break;
