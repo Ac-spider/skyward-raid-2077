@@ -7,7 +7,7 @@ const game = {
   state: "title", diff: CONFIG.difficulties.normal, ship: CONFIG.ships.balanced, currentLevel: 0, world: 1, player: null, boss: null,
   playerBullets: [], homingShots: [], missiles: [], playerLasers: [], enemyBullets: [], enemies: [], powerups: [], particles: [], floats: [], lasers: [], shockwaves: [], specialWaves: [],
   score: 0, combo: 0, comboTimer: 0, maxCombo: 0,
-  threat: 0, chips: {}, bonuses: {}, _chipCursor: 0, _chipChoices: [], _chipRerolls: 0, _bonusKillN: 0, _noHitT: 0, _emergencyBarrierCd: 0, _chipStats: {}, _bonusStats: {}, _maxThreatLevel: 0,
+  threat: 0, chips: {}, bonuses: {}, _chipCursor: 0, _chipChoices: [], _chipRerolls: 0, _nextChipDraftAt: 0, _bonusKillN: 0, _noHitT: 0, _emergencyBarrierCd: 0, _chipStats: {}, _bonusStats: {}, _maxThreatLevel: 0,
   flashTimer: 0, bannerText: "", bannerSub: "", bannerTimer: 0, warningTimer: 0, titleT: 0, _sliderDrag: false,
   dlgName: "", dlgText: "", dlgTimer: 0,   // P:BOSS 台词
   topScores: [], _recorded: false,
@@ -469,7 +469,7 @@ const game = {
   showDialogue(name, text, dur) { this.dlgName = name; this.dlgText = text || ""; this.dlgTimer = dur || 3.5; },   // P
   addShake(mag, t) { this._shake = Math.max(this._shake, mag); this._shakeT = Math.max(this._shakeT, t); },   // N
   hitStop(t) { this._hitStopT = Math.max(this._hitStopT, t); },
-  resetDepthSystems() { this.threat = 0; this.chips = {}; this.bonuses = {}; this._chipCursor = 0; this._chipChoices = []; this._chipRerolls = 0; this._bonusKillN = 0; this._noHitT = 0; this._emergencyBarrierCd = 0; this._chipStats = {}; this._bonusStats = {}; this._maxThreatLevel = 0; },
+  resetDepthSystems() { this.threat = 0; this.chips = {}; this.bonuses = {}; this._chipCursor = 0; this._chipChoices = []; this._chipRerolls = 0; this._nextChipDraftAt = 0; this._bonusKillN = 0; this._noHitT = 0; this._emergencyBarrierCd = 0; this._chipStats = {}; this._bonusStats = {}; this._maxThreatLevel = 0; },
   maxThreat() { return CONFIG.threat.maxLevel * CONFIG.threat.perLevel; },
   threatLevel() { return clamp(Math.floor(this.threat / CONFIG.threat.perLevel), 0, CONFIG.threat.maxLevel); },
   threatScoreMult() {
@@ -671,10 +671,18 @@ const game = {
     Sound.powerup();
     return true;
   },
+  canClaimChipReward() {
+    return !this.endless || (this._endlessT >= CONFIG.powerup.chipMinEndlessTime && this._endlessT >= this._nextChipDraftAt);
+  },
   claimChipReward() {
-    if (this.endless) { this.beginChipDraft(); return; }
+    if (this.endless) {
+      if (!this.canClaimChipReward()) return false;
+      this._nextChipDraftAt = this._endlessT + (CONFIG.powerup.chipDraftInterval || 22);
+      this.beginChipDraft(); return true;
+    }
     const key = this.activateNextChip(), c = CONFIG.chips[key];
     this.grantOverflowScore(c ? c.color : "#4dabf7");
+    return true;
   },
   triggerChainSpark(src) {
     const stacks = this.bonusStacks("chainSpark");
@@ -1049,7 +1057,9 @@ const game = {
   maybeDrop(type, x, y) { if (type === "small") return; if (this.rng() < CONFIG.powerup.dropChance) this.powerups.push(new PowerUp(x, y, this.chooseDrop())); },
   canDrop(kind) {
     if (kind !== "chip") return !!kind;
-    return !!this.player && (this.player.power >= CONFIG.powerup.chipMinPower || (this.endless && this._endlessT >= CONFIG.powerup.chipMinEndlessTime));
+    if (!this.player) return false;
+    if (this.endless) return this.canClaimChipReward();
+    return this.player.power >= CONFIG.powerup.chipMinPower;
   },
   chooseDrop() {
     const w = this.endless ? CONFIG.powerup.endlessWeights : CONFIG.powerup.weights;
@@ -1069,14 +1079,16 @@ const game = {
   collectPowerup(kind) {
     const p = this.player, o = CONFIG.overflow;
     if (kind === "power") {
-      if (p.power >= CONFIG.player.maxPower && p.overcharge >= CONFIG.player.maxOvercharge) this.claimChipReward();
+      if (p.power >= CONFIG.player.maxPower && p.overcharge >= CONFIG.player.maxOvercharge) {
+        if (!this.claimChipReward()) this.grantOverflowScore("#38d9a9");
+      }
       else {
         const wasMax = p.power >= CONFIG.player.maxPower;
         p.addPower();
         this.floats.push(new FloatText(p.x, p.y - 34, wasMax ? "过载 +" + p.overcharge : "火力 +1", wasMax ? "#74c0fc" : "#38d9a9"));
       }
     } else if (kind === "chip") {
-      this.claimChipReward();
+      if (!this.claimChipReward()) this.grantOverflowScore("#4dabf7");
     } else if (kind === "bomb") {
       if (p.bombs >= CONFIG.player.maxBombs) { p.addEnergy(o.bombEnergy); this.floats.push(new FloatText(p.x, p.y - 34, "能量 +" + o.bombEnergy, "#ffd43b")); this.addThreat(o.threatGain); this.grantOverflowScore("#ffd43b"); }
       else { p.addBomb(); this.floats.push(new FloatText(p.x, p.y - 34, "炸弹 +1", "#cc5de8")); }
