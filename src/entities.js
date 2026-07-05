@@ -1,0 +1,615 @@
+"use strict";
+
+/* =====================================================================
+ * 5) 实体
+ * ===================================================================== */
+class Player {
+  constructor() {
+    const c = CONFIG.player, ship = game.ship;
+    this.ship = ship;
+    this.x = c.startX; this.y = c.startY; this.radius = c.radius * (ship.radiusMult || 1);
+    this.maxHp = Math.round(c.maxHp * ship.hpMult * (game.endless ? CONFIG.endless.hpMult : 1)); this.hp = this.maxHp;
+    this.fireInterval = c.fireInterval * ship.fireMult;
+    this.power = 1; this.overcharge = 0;
+    this.bombs = clamp(game.activeDiff.startBombs + ship.bombs, 0, CONFIG.player.maxBombs);
+    this.wings = ship.wings;      // A:僚机数
+    this.energy = 0;             // B:必杀能量 0-100
+    this.specialCooldown = 0;    // Q:必杀冷却(秒),能量满 + 冷却结束才可释放
+    this.invulnAmount = game.activeDiff.invuln;
+    this._fireTimer = 0; this._homingTimer = 0; this._laserTimer = 0; this._missileTimer = 0;
+    this.invulnTimer = 0; this._flameTimer = 0;   // RR:引擎尾焰粒子发射计时
+    // X4:机型专属必杀状态——护盾(防御型)/隐身(侦查型)。攻击型必杀(全屏重伤)/平衡型必杀(冲击波)不需要常驻状态,现开现用。
+    this.shieldHp = 0; this.shieldMax = 0; this.shieldTimer = 0; this.stealthTimer = 0;
+  }
+  update(dt) {
+    const c = CONFIG.player;
+    if (Settings.data.controlMode === "joystick") {   // KK:定速推杆,而非贴向触点位置
+      const speed = CONFIG.joystick.maxSpeed * (this.ship.lerpMult || 1);
+      this.x += input.joyDX * speed * dt; this.y += input.joyDY * speed * dt;
+    } else {
+      const lerp = c.lerp * (this.ship.lerpMult || 1);
+      this.x += (input.targetX - this.x) * lerp; this.y += (input.targetY - this.y) * lerp;
+    }
+    this.x = clamp(this.x, this.radius, CONFIG.WIDTH - this.radius); this.y = clamp(this.y, this.radius, CONFIG.HEIGHT - this.radius);
+    if (this.invulnTimer > 0) this.invulnTimer -= dt;
+    if (this.specialCooldown > 0) this.specialCooldown -= dt;
+    if (this.stealthTimer > 0) this.stealthTimer -= dt;
+    if (this.shieldTimer > 0) { this.shieldTimer -= dt; if (this.shieldTimer <= 0) { this.shieldHp = 0; this.shieldMax = 0; } }
+    this.addEnergy(CONFIG.special.passiveGainPerSec * dt);   // X3:必杀能量随时间缓慢自然回复,不完全依赖击杀
+    // RR:引擎尾焰拖尾粒子(叠加在三角形闪烁尾焰之下,做出推进的动态感)
+    this._flameTimer -= dt;
+    if (this._flameTimer <= 0) { this._flameTimer = 0.03; game.spawnEngineFlame(this.x, this.y + 11); }
+    this._fireTimer -= dt;
+    if (this._fireTimer <= 0) {
+      this._fireTimer = this.fireInterval;
+      const pattern = CONFIG.weapon[clamp(this.power, 1, c.maxPower)];
+      for (const s of pattern) { const rad = s.deg * DEG; game.spawnPlayerBullet(this.x + s.ox, this.y - this.radius, Math.sin(rad) * c.bulletSpeed, -Math.cos(rad) * c.bulletSpeed); }
+      for (let i = 0; i < this.wings; i++) game.spawnPlayerBullet(this.x + wingOffsetX(i), this.y + 4, 0, -c.bulletSpeed);   // 僚机直射(任意数量排布)
+      Sound.shoot();
+    }
+    this.updateSecondaries(dt);
+  }
+  updateSecondaries(dt) {
+    const s = CONFIG.secondary, oc = this.overcharge || 0;
+    if (this.power >= s.homingPower) {
+      this._homingTimer -= dt;
+      if (this._homingTimer <= 0) {
+        this._homingTimer = Math.max(0.32, s.homingInterval - oc * 0.05);
+        const count = 1 + (oc >= 3 ? 1 : 0);
+        for (let i = 0; i < count; i++) game.spawnHomingShot(this.x + (i - (count - 1) / 2) * 18, this.y - this.radius, oc);
+      }
+    }
+    if (this.power >= s.laserPower) {
+      this._laserTimer -= dt;
+      if (this._laserTimer <= 0) { this._laserTimer = Math.max(0.55, s.laserInterval - oc * 0.06); game.spawnPlayerLaser(this.x, this.y - this.radius, oc); }
+    }
+    if (this.power >= s.missilePower) {
+      this._missileTimer -= dt;
+      if (this._missileTimer <= 0) {
+        this._missileTimer = Math.max(0.75, s.missileInterval - oc * 0.04);
+        game.spawnMissile(this.x - 16, this.y + 4, oc);
+        game.spawnMissile(this.x + 16, this.y + 4, oc);
+      }
+    }
+  }
+  // X4:护盾(防御型必杀)优先吸收伤害——盾量池打光了溢出部分才真正扣血;隐身(侦查型必杀)期间和普通受击无敌一样完全免伤
+  takeDamage(d) {
+    if (this.invulnTimer > 0 || this.stealthTimer > 0) return;
+    let dmg = d * (this.ship.dmgTakenMult || 1);
+    if (this.shieldHp > 0) {
+      game.spawnShieldHitSpark(this.x, this.y);
+      if (dmg <= this.shieldHp) { this.shieldHp -= dmg; dmg = 0; }
+      else { dmg -= this.shieldHp; this.shieldHp = 0; this.shieldTimer = 0; }
+    }
+    if (dmg > 0) this.hp -= dmg;
+    this.invulnTimer = this.invulnAmount; Sound.hit(); Haptics.hit(); game.addShake(4, 0.12); if (CONFIG.combo.resetOnHit) game.breakCombo();
+  }
+  addPower() {
+    if (this.power < CONFIG.player.maxPower) this.power++;
+    else this.overcharge = clamp(this.overcharge + 1, 0, CONFIG.player.maxOvercharge);
+  }
+  addBomb()    { this.bombs = clamp(this.bombs + 1, 0, CONFIG.player.maxBombs); }
+  addWing()    { this.wings = clamp(this.wings + 1, 0, CONFIG.wingMax); }
+  addEnergy(n) { this.energy = clamp(this.energy + n * (this.ship.energyMult || 1), 0, 100); }
+  heal(n)      { this.hp = clamp(this.hp + n, 0, this.maxHp); }
+  // X4:原来的机身绘制拆成 _drawBody,供隐身态(稳定半透明)和正常态共用,避免复制一遍
+  _drawBody(ctx) {
+    const x = this.x, y = this.y;
+    // 僚机(带小尾焰;可在设置里隐藏,世界坐标下绘制,不随机身缩放)
+    if (!Settings.data.hideWings) for (let i = 0; i < this.wings; i++) {
+      const wx = x + wingOffsetX(i), wy = y + 6;
+      ctx.fillStyle = "#ffa94d"; ctx.fillRect(wx - 1.5, wy + 6, 3, 4 + Math.random() * 3);
+      ctx.fillStyle = "#ced4da"; ctx.beginPath(); ctx.moveTo(wx, wy - 9); ctx.lineTo(wx - 7, wy + 7); ctx.lineTo(wx + 7, wy + 7); ctx.closePath(); ctx.fill();
+    }
+    // 主引擎尾焰(闪烁)
+    const fl = 11 + Math.sin(game.titleT * 28) * 4;
+    ctx.fillStyle = "#ffe066"; ctx.beginPath(); ctx.moveTo(x - 5, y + 11); ctx.lineTo(x + 5, y + 11); ctx.lineTo(x, y + 11 + fl); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ff922b"; ctx.beginPath(); ctx.moveTo(x - 3, y + 11); ctx.lineTo(x + 3, y + 11); ctx.lineTo(x, y + 11 + fl * 0.6); ctx.closePath(); ctx.fill();
+    // X:机身按 ship.bodyShape 分派专属剪影,整体按 radiusMult 缩放
+    drawShipBody(ctx, x, y, this.ship);
+  }
+  // X4:护盾(防御型必杀)——玻璃质感能量泡:径向渐变(边缘亮/中心透)+ 顶部高光弧(立体感)+ 六边形纹理(科技感)+ 随盾量衰减
+  _drawShield(ctx) {
+    const x = this.x, y = this.y, r = this.radius + 14, ratio = clamp(this.shieldHp / (this.shieldMax || 1), 0, 1);
+    const pulse = 0.85 + Math.sin(game.titleT * 4) * 0.15;
+    ctx.save(); ctx.globalAlpha = (0.35 + ratio * 0.35) * pulse;
+    const g = ctx.createRadialGradient(x, y, r * 0.3, x, y, r);
+    g.addColorStop(0, "rgba(120,220,255,.05)"); g.addColorStop(0.75, "rgba(80,180,255,.16)"); g.addColorStop(1, "rgba(150,230,255,.55)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    // 六边形纹理线,营造"能量护盾"的科技质感,而不是一片纯色泡泡
+    ctx.strokeStyle = "rgba(200,240,255,.25)"; ctx.lineWidth = 1;
+    for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + game.titleT * 0.3; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); ctx.stroke(); }
+    // 外缘亮环
+    ctx.strokeStyle = "rgba(210,245,255,.85)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+    // 顶部高光弧——模拟球面反光,是"立体感"和"真实透明感"的关键笔触
+    ctx.globalAlpha *= 0.8; ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(x, y, r - 4, Math.PI * 1.15, Math.PI * 1.55); ctx.stroke();
+    ctx.restore();
+  }
+  // X4:隐身(侦查型必杀)光晕——比护盾更冷、更"虚化",两条错相位的青色描边圈缓慢扩散淡出,呼应"隐匿"而非"防护"
+  _drawStealthShimmer(ctx) {
+    const x = this.x, y = this.y;
+    ctx.save(); ctx.strokeStyle = "rgba(153,233,242,.5)"; ctx.lineWidth = 1.5;
+    for (let i = 0; i < 2; i++) { const ph = (game.titleT * 1.4 + i * 0.5) % 1, rr = this.radius + 6 + ph * 22; ctx.globalAlpha = (1 - ph) * 0.5; ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.restore();
+  }
+  draw(ctx) {
+    if (this.stealthTimer > 0) {   // X4:稳定半透明,而不是像普通受击无敌那样快速闪烁——两者要能一眼区分开
+      ctx.save(); ctx.globalAlpha = 0.4; this._drawBody(ctx); ctx.restore();
+      this._drawStealthShimmer(ctx);
+      return;
+    }
+    if (this.invulnTimer > 0 && (Math.floor(this.invulnTimer * 20) % 2 === 0)) return;
+    this._drawBody(ctx);
+    if (this.shieldHp > 0) this._drawShield(ctx);
+  }
+}
+// X:机型专属机身剪影(delta 平衡/twin 攻击/bulk 防御/dart 侦查),按 ship.radiusMult 整体缩放
+// QQ:机翼/机身/座舱全部改渐变(取代纯色)+ 机翼加柔和投影,做出立体感;原始剪影坐标完全不变。
+function drawShipBody(ctx, x, y, ship) {
+  const col = ship.color, s = ship.radiusMult || 1, shape = ship.bodyShape || "delta";
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  const wingGrad = ctx.createLinearGradient(0, -4, 0, 16);
+  wingGrad.addColorStop(0, "#3d4f70"); wingGrad.addColorStop(1, "#161d2b");
+  const bodyGrad = ctx.createLinearGradient(-10, -20, 10, 14);
+  bodyGrad.addColorStop(0, UI.shade(col, 0.42)); bodyGrad.addColorStop(0.55, col); bodyGrad.addColorStop(1, UI.shade(col, -0.35));
+  const armorGrad = ctx.createLinearGradient(0, 3, 0, 13);
+  armorGrad.addColorStop(0, "#5c6572"); armorGrad.addColorStop(1, "#33383f");
+  const cockpitGrad = ctx.createRadialGradient(-1, -6.5, 0.4, 0, -4, 6);
+  cockpitGrad.addColorStop(0, "#ffffff"); cockpitGrad.addColorStop(0.55, "#bde3ff"); cockpitGrad.addColorStop(1, "#3b7dc4");
+
+  ctx.save(); ctx.shadowColor = "rgba(0,0,0,.5)"; ctx.shadowBlur = 7; ctx.shadowOffsetY = 4; ctx.fillStyle = wingGrad;
+  if (shape === "twin") { ctx.fillRect(-17, 6, 9, 8); ctx.fillRect(8, 6, 9, 8); }
+  else if (shape === "bulk") { ctx.beginPath(); ctx.moveTo(-20, 12); ctx.lineTo(0, 2); ctx.lineTo(20, 12); ctx.lineTo(12, 16); ctx.lineTo(-12, 16); ctx.closePath(); ctx.fill(); }
+  else if (shape === "dart") { ctx.beginPath(); ctx.moveTo(-11, 8); ctx.lineTo(0, 3); ctx.lineTo(11, 8); ctx.lineTo(6, 10); ctx.lineTo(-6, 10); ctx.closePath(); ctx.fill(); }
+  else { ctx.beginPath(); ctx.moveTo(-16, 10); ctx.lineTo(0, 1); ctx.lineTo(16, 10); ctx.lineTo(9, 14); ctx.lineTo(-9, 14); ctx.closePath(); ctx.fill(); }
+  ctx.restore();   // 阴影只加机翼这一层,不然多层叠加显脏
+
+  if (shape === "bulk") { ctx.fillStyle = armorGrad; ctx.fillRect(-14, 3, 6, 10); ctx.fillRect(8, 3, 6, 10); }
+
+  ctx.fillStyle = bodyGrad;
+  if (shape === "twin") { ctx.beginPath(); ctx.moveTo(0, -20); ctx.lineTo(-6, 12); ctx.lineTo(6, 12); ctx.closePath(); ctx.fill(); }
+  else if (shape === "bulk") { ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(-10, 12); ctx.lineTo(10, 12); ctx.closePath(); ctx.fill(); }
+  else if (shape === "dart") { ctx.beginPath(); ctx.moveTo(0, -20); ctx.lineTo(-5, 9); ctx.lineTo(5, 9); ctx.closePath(); ctx.fill(); }
+  else { ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(-8, 11); ctx.lineTo(8, 11); ctx.closePath(); ctx.fill(); }
+
+  ctx.fillStyle = "rgba(255,255,255,.4)";
+  if (shape === "twin") { ctx.beginPath(); ctx.moveTo(0, -20); ctx.lineTo(-2, 6); ctx.lineTo(0, 6); ctx.closePath(); ctx.fill(); }
+  else if (shape === "dart") { ctx.beginPath(); ctx.moveTo(0, -20); ctx.lineTo(-2, 5); ctx.lineTo(0, 5); ctx.closePath(); ctx.fill(); }
+  else if (shape !== "bulk") { ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(-3, 6); ctx.lineTo(0, 6); ctx.closePath(); ctx.fill(); }
+
+  ctx.fillStyle = cockpitGrad; ctx.beginPath(); ctx.ellipse(0, -4, 3.2, 5.5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// DD:constructor 委托给 init(),配合下面的 Pool 复用实例(无尽模式长时间跑,减少高频 new 的 GC 压力)
+class PlayerBullet {
+  constructor(x, y, vx, vy) { this.init(x, y, vx, vy); }
+  init(x, y, vx, vy) { this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.radius = CONFIG.bullet.radius; this.dead = false; }
+  update(dt) { this.x += this.vx * dt; this.y += this.vy * dt; if (this.y < -20 || this.x < -20 || this.x > CONFIG.WIDTH + 20) this.dead = true; }
+  // QQ:纯色改渐变(弹头亮白、弹尾橙),做出"能量弹"质感;不用 shadowBlur(子弹多,省性能)
+  draw(ctx) {
+    const g = ctx.createLinearGradient(this.x, this.y - 8, this.x, this.y + 4);
+    g.addColorStop(0, "#fff9db"); g.addColorStop(1, "#ffa94d");
+    ctx.fillStyle = g; ctx.fillRect(this.x - 2, this.y - 8, 4, 12);
+  }
+}
+
+class EnemyBullet {
+  constructor(x, y, vx, vy, damage) { this.init(x, y, vx, vy, damage); }
+  init(x, y, vx, vy, damage) { this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.damage = damage; this.radius = CONFIG.enemyBullet.radius; this.dead = false; }
+  update(dt) { this.x += this.vx * dt; this.y += this.vy * dt; if (this.y > CONFIG.HEIGHT + 20 || this.y < -20 || this.x < -20 || this.x > CONFIG.WIDTH + 20) this.dead = true; }
+  // QQ:双色平涂改一个径向渐变(白热核心→暗红边缘),一次 fill 顺带比原来两次 fill 还省一点
+  draw(ctx) {
+    const g = ctx.createRadialGradient(this.x - 1, this.y - 1, 0.5, this.x, this.y, this.radius);
+    g.addColorStop(0, "#fff"); g.addColorStop(0.4, "#ff8787"); g.addColorStop(1, "#c92a2a");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+class HomingShot {
+  constructor(x, y, overcharge = 0) { this.init(x, y, overcharge); }
+  init(x, y, overcharge = 0) {
+    const s = CONFIG.secondary;
+    this.x = x; this.y = y; this.overcharge = overcharge; this.radius = s.homingRadius;
+    this.speed = s.homingSpeed + overcharge * 28; this.turn = s.homingTurn + overcharge * 0.55; this.damage = s.homingDamage + Math.floor(overcharge / 2);
+    this.vx = 0; this.vy = -this.speed; this.dead = false; this.life = 2.6;
+  }
+  update(dt) {
+    const target = game.nearestEnemy(this.x, this.y, 300);
+    if (target) {
+      const a = Math.atan2(target.y - this.y, target.x - this.x);
+      const tx = Math.cos(a) * this.speed, ty = Math.sin(a) * this.speed;
+      const k = clamp(this.turn * dt, 0, 1);
+      this.vx += (tx - this.vx) * k; this.vy += (ty - this.vy) * k;
+    }
+    this.x += this.vx * dt; this.y += this.vy * dt; this.life -= dt;
+    if (this.life <= 0 || this.y < -30 || this.x < -30 || this.x > CONFIG.WIDTH + 30) this.dead = true;
+  }
+  draw(ctx) {
+    const a = Math.atan2(this.vy, this.vx), tail = 18 + this.overcharge * 2;
+    ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(a + Math.PI / 2);
+    const g = ctx.createLinearGradient(0, -10, 0, tail);
+    g.addColorStop(0, "#fff"); g.addColorStop(0.35, "#74c0fc"); g.addColorStop(1, "rgba(116,192,252,0)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(-5, 4); ctx.lineTo(0, tail); ctx.lineTo(5, 4); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+}
+
+class Missile {
+  constructor(x, y, overcharge = 0) { this.init(x, y, overcharge); }
+  init(x, y, overcharge = 0) {
+    const s = CONFIG.secondary;
+    this.x = x; this.y = y; this.overcharge = overcharge; this.radius = 8;
+    this.speed = s.missileSpeed + overcharge * 18; this.turn = s.missileTurn + overcharge * 0.25; this.damage = s.missileDamage + overcharge;
+    this.splash = s.missileSplash + overcharge * 5; this.vx = 0; this.vy = -this.speed; this.dead = false; this.life = 3.5;
+  }
+  update(dt) {
+    const target = game.nearestEnemy(this.x, this.y, 360);
+    if (target) {
+      const a = Math.atan2(target.y - this.y, target.x - this.x);
+      const tx = Math.cos(a) * this.speed, ty = Math.sin(a) * this.speed;
+      const k = clamp(this.turn * dt, 0, 1);
+      this.vx += (tx - this.vx) * k; this.vy += (ty - this.vy) * k;
+    }
+    this.x += this.vx * dt; this.y += this.vy * dt; this.life -= dt;
+    if (this.life <= 0 || this.y < -40 || this.x < -40 || this.x > CONFIG.WIDTH + 40) this.dead = true;
+  }
+  draw(ctx) {
+    const a = Math.atan2(this.vy, this.vx);
+    ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(a + Math.PI / 2);
+    const trail = ctx.createLinearGradient(0, 6, 0, 28);
+    trail.addColorStop(0, "rgba(255,146,43,.9)"); trail.addColorStop(1, "rgba(255,146,43,0)");
+    ctx.fillStyle = trail; ctx.beginPath(); ctx.moveTo(-4, 5); ctx.lineTo(0, 30); ctx.lineTo(4, 5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ced4da"; ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(-6, 8); ctx.lineTo(6, 8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ff6b6b"; ctx.fillRect(-3, 2, 6, 6);
+    ctx.restore();
+  }
+}
+
+class PlayerLaser {
+  constructor(x, y, overcharge = 0) { this.init(x, y, overcharge); }
+  init(x, y, overcharge = 0) {
+    const s = CONFIG.secondary;
+    this.x = x; this.y = y; this.overcharge = overcharge; this.width = s.laserWidth + overcharge * 3;
+    this.damage = s.laserDamage + Math.floor(overcharge / 2); this.life = s.laserDuration + overcharge * 0.01; this.maxLife = this.life; this.dead = false; this.hitEnemies = new Set();
+  }
+  update(dt) { this.life -= dt; if (this.life <= 0) this.dead = true; }
+  draw(ctx) {
+    const a = clamp(this.life / this.maxLife, 0, 1), half = this.width / 2;
+    ctx.save(); ctx.globalAlpha = a;
+    const glow = ctx.createLinearGradient(this.x - half * 2, 0, this.x + half * 2, 0);
+    glow.addColorStop(0, "rgba(77,171,247,0)"); glow.addColorStop(0.5, "rgba(116,192,252,.5)"); glow.addColorStop(1, "rgba(77,171,247,0)");
+    ctx.fillStyle = glow; ctx.fillRect(this.x - half * 2, 0, half * 4, this.y);
+    ctx.fillStyle = "#fff"; ctx.fillRect(this.x - Math.max(2, half * 0.22), 0, Math.max(4, half * 0.44), this.y);
+    ctx.restore();
+  }
+}
+
+class Enemy {
+  constructor(type, x, yOffset = 0, move = "straight") { this.init(type, x, yOffset, move); }
+  init(type, x, yOffset = 0, move = "straight") {
+    const t = CONFIG.enemy[type];
+    this.type = type; this.isBoss = false; this.x = x; this.y = -t.radius - yOffset;
+    this.baseX = x; this.baseY = this.y; this.radius = t.radius; this.hp = t.hp; this.speed = t.speed; this.score = t.score; this.color = t.color; this.cfg = t;
+    this._fireTimer = 0.6 + Math.random() * 0.6; this.dead = false;
+    // 运动状态
+    this.move = move; this.mp = CONFIG.moves[move] || {}; this._mt = 0;
+    this.phase = "in"; this._ht = 0; this._aimed = false; this.vx = 0; this.vy = 0; this._flash = 0;
+    this._carrierSpawn = 0;   // W2:carrier 裂解出的僚机短暂带一圈紫色识别环,归零后就是普通敌机(池复用要清零,不然会带着上一轮的状态)
+  }
+  applyMove(dt) {
+    const W = CONFIG.WIDTH, m = this.mp;
+    if (this.move === "sine") {
+      this.y += this.speed * dt;
+      this.x = clamp(this.baseX + Math.sin(this._mt * m.freq) * m.amp, this.radius, W - this.radius);
+    } else if (this.move === "zigzag") {
+      this.y += this.speed * dt;
+      const ph = (this._mt % m.period) / m.period, tri = ph < 0.5 ? ph * 2 : 2 - ph * 2;   // 三角波 0→1→0
+      this.x = clamp(this.baseX + (tri * 2 - 1) * m.amp, this.radius, W - this.radius);
+    } else if (this.move === "swoop") {
+      if (this.phase === "in") { this.y += this.speed * dt; if (this.y >= m.holdY) this.phase = "hold"; }
+      else if (this.phase === "hold") { this._ht += dt; this.x += Math.sin(this._mt * 4) * 60 * dt; if (this._ht >= m.hold) { this.phase = "dive"; this.vy = this.speed * m.diveVy; this.vx = clamp((game.player ? game.player.x - this.x : 0), -120, 120); } }
+      else { this.x += this.vx * dt; this.y += this.vy * dt; }
+    } else if (this.move === "dive") {
+      if (!this._aimed) { this.y += this.speed * dt; if (this.y > CONFIG.HEIGHT * m.triggerY && game.player) { const a = Math.atan2(game.player.y - this.y, game.player.x - this.x), sp = this.speed * m.speedMul; this.vx = Math.cos(a) * sp; this.vy = Math.sin(a) * sp; this._aimed = true; } }
+      else { this.x += this.vx * dt; this.y += this.vy * dt; }
+    } else if (this.move === "orbit") {   // Z:绕基准点公转 + 缓慢下降
+      this.baseY += this.speed * 0.5 * dt;
+      this.x = clamp(this.baseX + Math.cos(this._mt * m.speed) * m.radius, this.radius, W - this.radius);
+      this.y = this.baseY + Math.sin(this._mt * m.speed) * m.radius * 0.6;
+    } else {
+      this.y += this.speed * dt;   // straight
+    }
+  }
+  update(dt) {
+    this._mt += dt;
+    if (this._flash > 0) this._flash -= dt;
+    if (this._carrierSpawn > 0) this._carrierSpawn -= dt;
+    this.applyMove(dt);
+    if (this.y > CONFIG.HEIGHT + this.radius || this.x < -70 || this.x > CONFIG.WIDTH + 70) this.dead = true;
+    if (this.cfg.fireInterval > 0 && this.y > 0 && this.y < CONFIG.HEIGHT * 0.7 && game.player) {
+      this._fireTimer -= dt;
+      if (this._fireTimer <= 0) { this._fireTimer = this.cfg.fireInterval * game.activeDiff.fireMult; const aim = Math.atan2(game.player.y - this.y, game.player.x - this.x); game.fireFan(this.x, this.y, aim, 22 * DEG, this.cfg.shots, this.cfg.bulletSpeed, this.cfg.damage); }
+    }
+  }
+  damage(d) { this.hp -= d; this._flash = 0.06; if (this.hp <= 0) { this.dead = true; return true; } return false; }
+  // QQ:主体色改渐变(受光面亮/边缘暗)+ 整体加柔和投影,取代纯色平涂,读起来更有质感
+  draw(ctx) {
+    const x = this.x, y = this.y, r = this.radius, t = this.type;
+    let c;
+    if (this._flash > 0) c = "#fff";
+    else { c = ctx.createRadialGradient(x - r * 0.3, y - r * 0.35, r * 0.1, x, y, r); c.addColorStop(0, UI.shade(this.color, 0.4)); c.addColorStop(1, UI.shade(this.color, -0.25)); }
+    ctx.save(); ctx.shadowColor = "rgba(0,0,0,.35)"; ctx.shadowBlur = 5; ctx.shadowOffsetY = 3;
+    ctx.fillStyle = c;
+    if (t === "gunner") {                       // 重炮机:方形舰体 + 双炮管 + 核心
+      ctx.fillRect(x - r * 0.72, y - r * 0.5, r * 1.44, r);
+      // RR:重装装甲缝隙线 + 铆钉,区别于小型/中型的光滑机身
+      ctx.strokeStyle = "rgba(0,0,0,.4)"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x - r * 0.72, y - r * 0.1); ctx.lineTo(x + r * 0.72, y - r * 0.1); ctx.stroke();
+      ctx.fillStyle = "rgba(0,0,0,.35)";
+      for (const rx of [-0.55, 0, 0.55]) { ctx.beginPath(); ctx.arc(x + rx * r, y - r * 0.35, 1.6, 0, Math.PI * 2); ctx.fill(); }
+      ctx.fillStyle = "#495057"; ctx.fillRect(x - r * 0.55, y + r * 0.35, 5, r * 0.7); ctx.fillRect(x + r * 0.55 - 5, y + r * 0.35, 5, r * 0.7);
+      ctx.fillStyle = "#dfe6f0"; ctx.beginPath(); ctx.arc(x, y, r * 0.3, 0, Math.PI * 2); ctx.fill();
+    } else if (t === "splitter") {              // 分裂机:三段连体
+      ctx.fillStyle = "#0b3b2e"; ctx.fillRect(x - r * 0.75, y - 3, r * 1.5, 6);
+      for (let k = -1; k <= 1; k++) { ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x + k * r * 0.55, y, r * 0.42, 0, Math.PI * 2); ctx.fill(); }
+    } else if (t === "large") {                 // 大型:重装机 + 侧舱 + 座舱
+      ctx.beginPath(); ctx.moveTo(x, y + r); ctx.lineTo(x - r, y - r * 0.5); ctx.lineTo(x - r * 0.4, y - r); ctx.lineTo(x + r * 0.4, y - r); ctx.lineTo(x + r, y - r * 0.5); ctx.closePath(); ctx.fill();
+      // RR:装甲板缝隙线,呼应 BOSS 的装甲纹理,做出"重装"辨识度
+      ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x - r * 0.5, y - r * 0.1); ctx.lineTo(x + r * 0.5, y - r * 0.1); ctx.moveTo(x, y - r * 0.6); ctx.lineTo(x, y + r * 0.6); ctx.stroke();
+      ctx.fillStyle = "#7a2b45"; ctx.fillRect(x - r * 0.78, y - r * 0.2, r * 0.32, r * 0.6); ctx.fillRect(x + r * 0.46, y - r * 0.2, r * 0.32, r * 0.6);
+      ctx.fillStyle = "#ffe3ef"; ctx.beginPath(); ctx.arc(x, y - r * 0.2, r * 0.22, 0, Math.PI * 2); ctx.fill();
+    } else if (t === "medium") {                // 中型:双尾翼战机
+      ctx.beginPath(); ctx.moveTo(x, y + r); ctx.lineTo(x - r, y - r * 0.7); ctx.lineTo(x, y - r); ctx.lineTo(x + r, y - r * 0.7); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#7a4a12"; ctx.beginPath(); ctx.arc(x, y - r * 0.1, r * 0.25, 0, Math.PI * 2); ctx.fill();
+    } else if (t === "sniper") {                // Z:狙击机:细长机身 + 长瞄准管
+      ctx.beginPath(); ctx.moveTo(x, y + r); ctx.lineTo(x - r * 0.5, y - r * 0.3); ctx.lineTo(x, y - r); ctx.lineTo(x + r * 0.5, y - r * 0.3); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#495057"; ctx.fillRect(x - 2, y - r - 10, 4, 12);
+    } else if (t === "detonator") {              // Z:雷机:圆形弹体 + 警示十字
+      ctx.beginPath(); ctx.arc(x, y, r * 0.8, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x - r * 0.5, y); ctx.lineTo(x + r * 0.5, y); ctx.moveTo(x, y - r * 0.5); ctx.lineTo(x, y + r * 0.5); ctx.stroke();
+    } else if (t === "phantom") {                // V:幻影机:细窄机身 + 双侧刃翼
+      ctx.beginPath(); ctx.moveTo(x, y + r); ctx.lineTo(x - r * 0.35, y - r * 0.2); ctx.lineTo(x, y - r); ctx.lineTo(x + r * 0.35, y - r * 0.2); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = UI.shade(this.color, -0.35);
+      ctx.beginPath(); ctx.moveTo(x - r * 0.3, y + r * 0.1); ctx.lineTo(x - r, y - r * 0.35); ctx.lineTo(x - r * 0.55, y + r * 0.25); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x + r * 0.3, y + r * 0.1); ctx.lineTo(x + r, y - r * 0.35); ctx.lineTo(x + r * 0.55, y + r * 0.25); ctx.closePath(); ctx.fill();
+    } else if (t === "carrier") {                // V:母舰机:厚重舰体 + 双侧发射舱(呼应死亡裂出僚机)
+      ctx.beginPath(); ctx.moveTo(x - r * 0.85, y - r * 0.2); ctx.lineTo(x - r * 0.5, y - r * 0.7); ctx.lineTo(x + r * 0.5, y - r * 0.7); ctx.lineTo(x + r * 0.85, y - r * 0.2); ctx.lineTo(x + r * 0.6, y + r * 0.6); ctx.lineTo(x - r * 0.6, y + r * 0.6); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,.4)"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x - r * 0.7, y); ctx.lineTo(x + r * 0.7, y); ctx.stroke();
+      ctx.fillStyle = "#2b1a4a"; ctx.beginPath(); ctx.arc(x - r * 0.55, y + r * 0.15, r * 0.18, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + r * 0.55, y + r * 0.15, r * 0.18, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#e5dbff"; ctx.beginPath(); ctx.arc(x, y - r * 0.15, r * 0.24, 0, Math.PI * 2); ctx.fill();
+    } else {                                    // 小型:轻型截击机
+      ctx.beginPath(); ctx.moveTo(x, y + r); ctx.lineTo(x - r, y - r * 0.8); ctx.lineTo(x, y - r * 0.35); ctx.lineTo(x + r, y - r * 0.8); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+    // W2:carrier 裂解出的僚机短暂带一圈脉动紫环,提示玩家"这是母舰刚炸出来的",1秒后自然消失,不需要额外状态清理
+    if (this._carrierSpawn > 0) {
+      ctx.save(); ctx.globalAlpha = clamp(this._carrierSpawn, 0, 1) * 0.8;
+      ctx.strokeStyle = "#9775fa"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, r + 5 + Math.sin(this._mt * 14) * 2, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+  }
+}
+
+// 弹幕库:BOSS 攻击的统一执行器(供各 BOSS 的 phases.attacks 引用)
+// Y:laser 有独立冷却(atk.cd,默认3秒),不跟随 phase.cd 高频触发(避免和 spiral 等快速 tick 撞在一起刷屏)
+function runBossAttack(b, atk) {
+  const g = game, dmg = b.bulletDamage;
+  if (atk.type === "fanDown") g.fireFan(b.x, b.y + b.radius, Math.PI / 2, atk.spread * DEG, atk.count, atk.speed, dmg);
+  else if (atk.type === "aimed") { const a = Math.atan2(g.player.y - b.y, g.player.x - b.x); g.fireFan(b.x, b.y, a, atk.spread * DEG, atk.count, atk.speed, dmg); }
+  else if (atk.type === "ring") g.fireRing(b.x, b.y, atk.count, atk.speed, dmg);
+  else if (atk.type === "spiral") { b._spiral += atk.step * DEG; for (let i = 0; i < atk.arms; i++) { const a = b._spiral + i * (Math.PI * 2 / atk.arms); g.spawnEnemyBullet(b.x, b.y, Math.cos(a) * atk.speed, Math.sin(a) * atk.speed, dmg); } }
+  else if (atk.type === "wall") { const gapX = g.player.x; for (let x = 24; x < CONFIG.WIDTH - 24; x += atk.spacing) { if (Math.abs(x - gapX) < atk.gap) continue; g.spawnEnemyBullet(x, b.y + b.radius * 0.4, 0, atk.speed, dmg); } }
+  else if (atk.type === "laser") { if (b._laserCd <= 0) { g.spawnBossLaser(atk.aimed ? g.player.x : b.x, atk.warn || 0.6, atk.dur || 0.8, atk.width || 46, dmg); b._laserCd = atk.cd || 3.0; } }
+}
+
+// Y:BOSS 造型剪影(供 Boss.draw 与首页图鉴共用)
+// QQ:纯色改渐变(受光面亮/边缘暗),给BOSS舰体加立体感;供 Boss.draw 与首页图鉴共用
+function fillBossShape(ctx, x, y, r, shape, color) {
+  const grad = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.15, x, y, r);
+  grad.addColorStop(0, UI.shade(color, 0.35)); grad.addColorStop(1, UI.shade(color, -0.3));
+  ctx.fillStyle = grad;
+  if (shape === "cross") { ctx.fillRect(x - r, y - r * 0.4, 2 * r, r * 0.8); ctx.fillRect(x - r * 0.4, y - r, r * 0.8, 2 * r); return; }
+  ctx.beginPath();
+  if (shape === "hex") { for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3, px = x + Math.cos(a) * r, py = y + Math.sin(a) * r; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); } }
+  else if (shape === "star") { for (let i = 0; i < 10; i++) { const rad = i % 2 === 0 ? r : r * 0.5, a = -Math.PI / 2 + i * Math.PI / 5, px = x + Math.cos(a) * rad, py = y + Math.sin(a) * rad; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); } }
+  // V:世界5 最终BOSS 造型 —— 正八边形,比六边形更"重",比星形更"沉稳/邪异"
+  else if (shape === "octagon") { for (let i = 0; i < 8; i++) { const a = Math.PI / 8 + i * Math.PI / 4, px = x + Math.cos(a) * r, py = y + Math.sin(a) * r; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); } }
+  else { ctx.moveTo(x, y + r); ctx.lineTo(x - r, y - r * 0.6); ctx.lineTo(x - r * 0.5, y - r); ctx.lineTo(x + r * 0.5, y - r); ctx.lineTo(x + r, y - r * 0.6); }
+  ctx.closePath(); ctx.fill();
+}
+
+class Boss {
+  constructor(defIndex) {
+    const def = CONFIG.bosses[defIndex % CONFIG.bosses.length];
+    this.def = def; this.isBoss = true;
+    this.x = CONFIG.WIDTH / 2; this.y = -def.radius; this.radius = def.radius;
+    this.maxHp = Math.round(def.hp * game.activeDiff.bossHpMult); this.hp = this.maxHp;
+    this.bulletDamage = def.damage; this.score = def.score;   // 注意:不能叫 this.damage,会覆盖 damage() 方法
+    this._fireScale = game.activeDiff.fireMult;              // 难度射速
+    this.dead = false; this._t = 0; this._moveT = 0; this._entered = false; this._flash = 0;
+    this._fireTimer = 1.2; this._spiral = 0; this._targetX = this.x;
+    this._enraged = false; this._laserCd = 0;   // Y:狂暴阶段 / 镭射独立冷却
+    this.defIndex = defIndex % CONFIG.bosses.length;   // W2:记下具体是哪个BOSS,给"击败特定BOSS"成就用
+  }
+  get phaseIndex() { const r = this.hp / this.maxHp, ph = this.def.phases; for (let i = 0; i < ph.length; i++) if (r > ph[i].until) return i; return ph.length - 1; }
+  get phase() { return this.phaseIndex + 1; }         // 兼容旧引用
+  move(dt) {
+    const def = this.def, cx = CONFIG.WIDTH / 2;
+    if (def.movement === "sweep") this.x = cx + Math.sin(this._t * def.moveSpeed) * def.moveRange;
+    else if (def.movement === "figure8") { this.x = cx + Math.sin(this._t * def.moveSpeed) * def.moveRange; this.y = def.enterY + Math.sin(this._t * def.moveSpeed * 2) * 40; }
+    else if (def.movement === "dart") {
+      this.x += (this._targetX - this.x) * 0.06;
+      if (this._moveT > (def.dartEvery || 2)) { this._moveT = 0; const m = def.radius + 40; this._targetX = m + Math.random() * (CONFIG.WIDTH - 2 * m); }
+    }
+  }
+  update(dt) {
+    const def = this.def;
+    if (!this._entered) { this.y += 90 * dt; if (this.y >= def.enterY) { this.y = def.enterY; this._entered = true; } return; }
+    this._t += dt; this._moveT += dt; if (this._flash > 0) this._flash -= dt; if (this._laserCd > 0) this._laserCd -= dt; this.move(dt);
+    // Y:血量 <=20% 时触发一次狂暴,此后攻击频率永久提升
+    if (!this._enraged && this.hp / this.maxHp <= 0.2) { this._enraged = true; this._fireScale *= 0.7; game.onBossEnrage(this); }
+    const phase = def.phases[this.phaseIndex];
+    this._fireTimer -= dt;
+    if (this._fireTimer <= 0) { this._fireTimer = phase.cd * this._fireScale; for (const atk of phase.attacks) runBossAttack(this, atk); }
+  }
+  damage(d) { this.hp -= d; this._flash = 0.05; if (this.hp <= 0) { this.dead = true; return true; } return false; }
+  draw(ctx) {
+    const flash = this._flash > 0, color = flash ? "#fff" : this.def.colors[this.phaseIndex], r = this.radius, x = this.x, y = this.y;
+    // Y:狂暴态外圈红色脉动光晕
+    if (this._enraged) { const gr = r + 14 + Math.sin(this._t * 6) * 4; ctx.fillStyle = "rgba(255,40,40,.22)"; ctx.beginPath(); ctx.arc(x, y, gr, 0, Math.PI * 2); ctx.fill(); }
+    // 侧翼炮塔
+    ctx.fillStyle = "#2b3038"; ctx.fillRect(x - r - 7, y - 8, 12, 26); ctx.fillRect(x + r - 5, y - 8, 12, 26);
+    ctx.fillStyle = "#495057"; ctx.fillRect(x - r - 3, y + 16, 4, 8); ctx.fillRect(x + r - 1, y + 16, 4, 8);
+    // 舰体(剪影逻辑抽到 fillBossShape,供图鉴复用)
+    fillBossShape(ctx, x, y, r, this.def.shape, color);
+    // 装甲板线 + RR:铆钉点缀,强化"重型装甲"金属质感
+    ctx.strokeStyle = "rgba(0,0,0,.28)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x - r * 0.6, y - r * 0.2); ctx.lineTo(x + r * 0.6, y - r * 0.2); ctx.moveTo(x, y - r * 0.6); ctx.lineTo(x, y + r * 0.5); ctx.stroke();
+    ctx.fillStyle = "rgba(0,0,0,.3)";
+    for (const [rx, ry] of [[-0.6, -0.2], [0.6, -0.2], [0, -0.6], [0, 0.5]]) { ctx.beginPath(); ctx.arc(x + rx * r, y + ry * r, 2, 0, Math.PI * 2); ctx.fill(); }
+    // 脉动核心(发光)—— QQ:加 shadowBlur 做真正的辉光,而不只是纯色圆点
+    const pr = 11 + Math.sin(this._t * 4) * 3, coreCol = ["#845ef7", "#e64980", "#f03e3e"][this.phaseIndex];
+    ctx.save(); ctx.shadowColor = flash ? "#fff" : coreCol; ctx.shadowBlur = 16;
+    ctx.fillStyle = flash ? "#fff" : "#ffe3e3"; ctx.beginPath(); ctx.arc(x, y - 6, pr, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = coreCol; ctx.beginPath(); ctx.arc(x, y - 6, pr * 0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+class PowerUp {
+  constructor(x, y, kind) { this.x = x; this.y = y; this.kind = kind; this.radius = CONFIG.powerup.radius; this.dead = false; }
+  update(dt) { this.y += CONFIG.powerup.speed * dt; if (this.y > CONFIG.HEIGHT + this.radius) this.dead = true; }
+  draw(ctx) {
+    const x = this.x, y = this.y, r = this.radius;
+    const bg = { heal: "#e03131", power: "#2f9e44", bomb: "#5f3dc4", wing: "#495057" }[this.kind];
+    const pulse = 0.78 + Math.sin(game.titleT * 6 + x * 0.03) * 0.12;
+    ctx.save();
+    ctx.shadowColor = bg; ctx.shadowBlur = 12 * pulse;
+    const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, 2, x, y, r * 1.4);
+    g.addColorStop(0, UI.shade(bg, 0.55)); g.addColorStop(0.65, bg); g.addColorStop(1, UI.shade(bg, -0.45));
+    UI.roundRect(ctx, x - r, y - r, r * 2, r * 2, 6); ctx.fillStyle = g; ctx.fill();
+    ctx.restore();
+    UI.roundRect(ctx, x - r + 1.5, y - r + 1.5, r * 2 - 3, r * 2 - 3, 5);
+    ctx.strokeStyle = "rgba(255,255,255,.92)"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "#fff";
+    if (this.kind === "heal") {           // 血包:白色十字
+      ctx.fillRect(x - 3, y - 8, 6, 16); ctx.fillRect(x - 8, y - 3, 16, 6);
+    } else if (this.kind === "power") {   // 火力:白色双上箭头
+      for (let k = 0; k < 2; k++) { const oy = k * 8 - 4; ctx.beginPath(); ctx.moveTo(x, y + oy - 4); ctx.lineTo(x - 7, y + oy + 4); ctx.lineTo(x + 7, y + oy + 4); ctx.closePath(); ctx.fill(); }
+    } else if (this.kind === "bomb") {     // 炸弹:圆弹体 + 引线 + 火星
+      ctx.beginPath(); ctx.arc(x, y + 2, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x + 4, y - 4); ctx.lineTo(x + 8, y - 9); ctx.stroke();
+      ctx.fillStyle = "#ffd43b"; ctx.beginPath(); ctx.arc(x + 9, y - 10, 2.6, 0, Math.PI * 2); ctx.fill();
+    } else {                              // 僚机:两片小机翼
+      ctx.beginPath(); ctx.moveTo(x - 2, y - 8); ctx.lineTo(x - 11, y + 6); ctx.lineTo(x - 2, y + 3); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x + 2, y - 8); ctx.lineTo(x + 11, y + 6); ctx.lineTo(x + 2, y + 3); ctx.closePath(); ctx.fill();
+    }
+  }
+}
+
+class Particle {
+  constructor(x, y, vx, vy, color) { this.init(x, y, vx, vy, color); }
+  init(x, y, vx, vy, color) { this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.color = color; this.life = 0.4 + Math.random() * 0.4; this.maxLife = this.life; this.size = 2 + Math.random() * 3; this.dead = false; }
+  update(dt) { this.x += this.vx * dt; this.y += this.vy * dt; this.vx *= 0.92; this.vy *= 0.92; this.life -= dt; if (this.life <= 0) this.dead = true; }
+  // RR:叠一个小号白热核心(而不是每个粒子都建渐变——粒子量大,渐变对象分配比多画一次fillRect贵)
+  draw(ctx) {
+    ctx.globalAlpha = Math.max(0, this.life / this.maxLife);
+    ctx.fillStyle = this.color; ctx.fillRect(this.x - this.size / 2, this.y - this.size / 2, this.size, this.size);
+    ctx.fillStyle = "rgba(255,255,255,.55)"; const hs = this.size * 0.42; ctx.fillRect(this.x - hs / 2, this.y - hs / 2, hs, hs);
+    ctx.globalAlpha = 1;
+  }
+}
+
+// CC:冲击波圆环(击杀反馈)—— 从小圈快速扩散到 maxR 并淡出
+class Shockwave {
+  constructor(x, y, maxR, color) { this.x = x; this.y = y; this.maxR = maxR; this.color = color; this.r = maxR * 0.15; this.life = 0.4; this.maxLife = 0.4; this.dead = false; }
+  update(dt) { this.life -= dt; if (this.life <= 0) { this.dead = true; return; } const t = 1 - this.life / this.maxLife; this.r = this.maxR * (0.15 + 0.85 * t); }
+  // II:save/restore 包起来,不留 lineWidth/strokeStyle 尾巴(审计发现的同类隐患,目前无可见影响但顺手加固)
+  // RR:描边改渐变(内侧亮白外侧渐隐到底色),比纯色圆环更有"能量冲击波"的质感
+  draw(ctx) {
+    ctx.save(); const t = 1 - this.life / this.maxLife; ctx.globalAlpha = Math.max(0, 1 - t) * 0.65;
+    const g = ctx.createRadialGradient(this.x, this.y, Math.max(0, this.r - 6), this.x, this.y, this.r);
+    g.addColorStop(0, "rgba(255,255,255,.9)"); g.addColorStop(1, this.color);
+    ctx.strokeStyle = g; ctx.lineWidth = 3 * (1 - t) + 1; ctx.beginPath(); ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+  }
+}
+
+// X4:平衡型必杀"破阵冲击波"——从玩家位置向上发射的弧形能量波,随行进逐渐变宽,清除沿途弹幕并对扫到的敌机造成一次伤害。
+// 只在使用必杀时生成(低频事件),不进对象池,和 Shockwave 同样直接 new/丢弃。
+class SpecialWave {
+  constructor(x, y, color) { this.init(x, y, color); }
+  init(x, y, color) {
+    this.x = x; this.y = y; this.color = color || "#4dabf7";
+    this.width = 70; this.thickness = 40; this.vy = -560; this.t = 0; this.dead = false; this.hitEnemies = new Set();
+  }
+  update(dt) { this.t += dt; this.y += this.vy * dt; this.width += 240 * dt; if (this.y < -this.thickness) this.dead = true; }
+  // RR:三层叠加做出"精致"感——半透明扇形尾迹(残留能量)+ 渐变亮边(波前轮廓)+ 中心辉光描边(能量核心)
+  draw(ctx) {
+    const alpha = clamp(1 - this.t / 0.9, 0, 1), halfW = this.width / 2;
+    if (alpha <= 0) return;
+    ctx.save(); ctx.globalAlpha = alpha * 0.9;
+    const trailG = ctx.createLinearGradient(this.x, this.y, this.x, this.y + this.thickness * 1.8);
+    trailG.addColorStop(0, UI.rgba(this.color, .35)); trailG.addColorStop(1, UI.rgba(this.color, 0));
+    ctx.fillStyle = trailG;
+    ctx.beginPath(); ctx.moveTo(this.x - halfW, this.y + this.thickness * 1.8); ctx.quadraticCurveTo(this.x, this.y - this.thickness * 0.3, this.x + halfW, this.y + this.thickness * 1.8); ctx.closePath(); ctx.fill();
+    const edgeG = ctx.createLinearGradient(this.x - halfW, 0, this.x + halfW, 0);
+    edgeG.addColorStop(0, UI.rgba(this.color, 0)); edgeG.addColorStop(0.5, "#fff"); edgeG.addColorStop(1, UI.rgba(this.color, 0));
+    ctx.strokeStyle = edgeG; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(this.x - halfW, this.y + this.thickness * 0.5); ctx.quadraticCurveTo(this.x, this.y - this.thickness * 0.5, this.x + halfW, this.y + this.thickness * 0.5); ctx.stroke();
+    ctx.globalAlpha = alpha * 0.75; ctx.shadowColor = this.color; ctx.shadowBlur = 16;
+    ctx.strokeStyle = this.color; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(this.x - halfW * 0.7, this.y + this.thickness * 0.5); ctx.quadraticCurveTo(this.x, this.y - this.thickness * 0.3, this.x + halfW * 0.7, this.y + this.thickness * 0.5); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+// DD:对象池 —— 高频 new/丢弃的四种对象(子弹×2/敌机/粒子)改为复用实例,减少无尽模式长时间运行的 GC 压力。
+// 用法:pools.x.get(...同构造函数参数) 取一个(池里没有就 new 一个),对象标记 dead 后在 filter 之前 pools.x.release(o) 还回去。
+class Pool {
+  constructor(Ctor) { this.Ctor = Ctor; this.free = []; }
+  get(...args) { const o = this.free.pop(); if (o) { o.init(...args); return o; } return new this.Ctor(...args); }
+  release(o) { this.free.push(o); }
+}
+const pools = {
+  playerBullet: new Pool(PlayerBullet),
+  enemyBullet: new Pool(EnemyBullet),
+  homingShot: new Pool(HomingShot),
+  missile: new Pool(Missile),
+  playerLaser: new Pool(PlayerLaser),
+  enemy: new Pool(Enemy),
+  particle: new Pool(Particle),
+};
+function pruneDead(list, release) {
+  let write = 0;
+  for (let read = 0; read < list.length; read++) {
+    const o = list[read];
+    if (o.dead) {
+      if (release) release(o);
+    } else {
+      list[write++] = o;
+    }
+  }
+  list.length = write;
+}
+const releaseDead = {
+  playerBullet: (o) => pools.playerBullet.release(o),
+  enemyBullet: (o) => pools.enemyBullet.release(o),
+  homingShot: (o) => pools.homingShot.release(o),
+  missile: (o) => pools.missile.release(o),
+  playerLaser: (o) => pools.playerLaser.release(o),
+  enemy: (o) => { if (!o.isBoss) pools.enemy.release(o); },
+  particle: (o) => pools.particle.release(o),
+};
+
+class FloatText {
+  constructor(x, y, text, color) { this.x = x; this.y = y; this.text = text; this.color = color; this.life = 0.8; this.dead = false; }
+  update(dt) { this.y -= 32 * dt; this.life -= dt; if (this.life <= 0) this.dead = true; }
+  draw(ctx) { ctx.globalAlpha = clamp(this.life / 0.8, 0, 1); ctx.fillStyle = this.color; ctx.font = "bold 15px sans-serif"; ctx.textAlign = "center"; ctx.fillText(this.text, this.x, this.y); ctx.textAlign = "left"; ctx.globalAlpha = 1; }
+}

@@ -1,0 +1,13 @@
+html, body {
+    margin: 0; height: 100%;
+    background: #0a0e14; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  #stage { position: relative; background: #000; box-shadow: 0 0 40px rgba(0,150,255,.15); }
+  canvas { display: block; }
+  #hint {
+    position: absolute; left: 0; right: 0; bottom: 8px;
+    text-align: center; color: #4a90d9; font-size: 12px; opacity: .6; pointer-events: none;
+  }
