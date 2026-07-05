@@ -237,7 +237,8 @@ const Challenge = {
   },
   cleanSplits(splits) {
     if (!Array.isArray(splits)) return [];
-    return splits.map(s => ({ t: Math.floor(Number(s.t) || 0), score: Math.max(0, Math.round(Number(s.score) || 0)) })).filter(s => s.t > 0).slice(0, 3);
+    const max = CONFIG.challenge && CONFIG.challenge.splits ? CONFIG.challenge.splits.length : 3;
+    return splits.map(s => ({ t: Math.floor(Number(s.t) || 0), score: Math.max(0, Math.round(Number(s.score) || 0)) })).filter(s => s.t > 0).slice(0, max);
   },
   encode(run) {
     const splits = this.cleanSplits(run.splits);

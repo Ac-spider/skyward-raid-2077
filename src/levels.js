@@ -48,7 +48,7 @@ const LEVELS = [
   // W2:3-1/3-2 二次加量 —— 上一版只加了数量,但填充的多是不开火的 small/splitter,实战里"两个炸弹就能轻松过",
   //   这次把配方换成以 large/medium/gunner 等真正开火的机型为主,filler 压到最低,wait 也整体收紧,让场上随时保持有效弹幕压力
   { id: "3-1", world: 3, sub: 1, script: [
-    { wait: 0.6 }, { spawn: "large", count: 4, formation: "line", gap: 0.24, move: "sine" }, { spawn: "gunner", count: 3, formation: "arc", gap: 0.3, move: "sine" }, { powerup: "power" }, { wait: 0.5 },
+    { wait: 0.6 }, { spawn: "large", count: 4, formation: "line", gap: 0.24, move: "sine", elite: "shield" }, { spawn: "gunner", count: 3, formation: "arc", gap: 0.3, move: "sine" }, { powerup: "power" }, { wait: 0.5 },
     { spawnMix: [ { type: "medium", count: 6 }, { type: "splitter", count: 4 } ], formation: "vee", gap: 0.15, move: "dive" }, { wait: 0.5 },
     { spawnMix: [ { type: "gunner", count: 4 }, { type: "medium", count: 5 } ], formation: "line", gap: 0.16, move: "sine" }, { powerup: "bomb" }, { wait: 0.45 },
     { spawn: "large", count: 4, formation: "arc", gap: 0.26, move: "zigzag" }, { spawn: "gunner", count: 3, formation: "line", gap: 0.32, move: "orbit" }, { powerup: "power" }, { wait: 0.9 }, { clear: true },
@@ -68,8 +68,8 @@ const LEVELS = [
   // Z:世界4"深渊禁地" —— 引入 sniper(狙击机)/detonator(雷机),终章"深渊君王"以镭射机制收尾
   // W2:4-1/4-2 二次加量,理由同 3-1/3-2 —— 拉高开火机型占比、压缩 wait/gap,不再靠不开火的 small 凑数量充数
   { id: "4-1", world: 4, sub: 1, script: [
-    { wait: 0.6 }, { spawn: "sniper", count: 4, formation: "line", gap: 0.35, move: "straight" }, { spawn: "gunner", count: 2, formation: "vee", gap: 0.4, move: "sine" }, { powerup: "power" }, { wait: 0.5 },
-    { spawnMix: [ { type: "medium", count: 6 }, { type: "sniper", count: 4 } ], formation: "line", gap: 0.14, move: "zigzag" }, { wait: 0.5 },
+    { wait: 0.6 }, { spawn: "sniper", count: 4, formation: "line", gap: 0.35, move: "straight", elite: "charger" }, { spawn: "gunner", count: 2, formation: "vee", gap: 0.4, move: "sine" }, { powerup: "power" }, { wait: 0.5 },
+    { spawnMix: [ { type: "medium", count: 5 }, { type: "sniper", count: 4 }, { type: "jammer", count: 2 } ], formation: "line", gap: 0.14, move: "zigzag" }, { wait: 0.5 },
     { spawn: "gunner", count: 5, formation: "vee", gap: 0.28, move: "orbit" }, { spawn: "small", count: 8, formation: "line", gap: 0.16 }, { powerup: "bomb" }, { wait: 0.5 },
     { spawnMix: [ { type: "medium", count: 6 }, { type: "gunner", count: 3 }, { type: "sniper", count: 3 } ], formation: "arc", gap: 0.16, move: "sine" }, { wait: 0.45 },
     { spawn: "sniper", count: 5, formation: "line", gap: 0.3, move: "straight" }, { spawn: "small", count: 10, formation: "arc", gap: 0.16, move: "dive" }, { powerup: "power" }, { wait: 0.9 }, { clear: true },
@@ -97,7 +97,7 @@ const LEVELS = [
     { spawnMix: [ { type: "phantom", count: 8 }, { type: "gunner", count: 3 }, { type: "sniper", count: 3 } ], formation: "arc", gap: 0.14, move: "sine" }, { spawn: "small", count: 6, formation: "line", gap: 0.2 }, { powerup: "power" }, { wait: 0.9 }, { clear: true },
   ] },
   { id: "5-2", world: 5, sub: 2, script: [
-    { wait: 0.6 }, { spawn: "carrier", count: 3, formation: "line", gap: 0.45, move: "sine" }, { spawn: "phantom", count: 5, formation: "arc", gap: 0.2, move: "zigzag" }, { powerup: "power" }, { wait: 0.5 },
+    { wait: 0.6 }, { spawn: "carrier", count: 3, formation: "line", gap: 0.45, move: "sine", elite: "shield" }, { spawn: "support", count: 2, formation: "arc", gap: 0.42, move: "sine" }, { spawn: "phantom", count: 5, formation: "arc", gap: 0.2, move: "zigzag" }, { powerup: "power" }, { wait: 0.5 },
     { spawnMix: [ { type: "phantom", count: 6 }, { type: "detonator", count: 4 } ], formation: "line", gap: 0.14, move: "sine" }, { powerup: "heal" }, { wait: 0.5 },
     { spawn: "carrier", count: 3, formation: "vee", gap: 0.4, move: "swoop" }, { spawn: "sniper", count: 5, formation: "line", gap: 0.26, move: "straight" }, { powerup: "power" }, { wait: 0.45 },
     { spawn: "carrier", count: 3, formation: "vee", gap: 0.38, move: "orbit" }, { spawn: "phantom", count: 8, formation: "line", gap: 0.14, move: "sine" }, { powerup: "heal" }, { wait: 0.45 },
@@ -119,7 +119,7 @@ function bossLevelIds(defIndex) {
 function formationX(formation, i, count, radius) {
   const W = CONFIG.WIDTH, m = radius + 20;
   if (formation === "center") return W / 2;
-  if (formation === "random") return m + Math.random() * (W - 2 * m);
+  if (formation === "random") return m + game.rng() * (W - 2 * m);
   return count <= 1 ? W / 2 : m + i * (W - 2 * m) / (count - 1);
 }
 function formationYOffset(formation, i, count) {
@@ -130,11 +130,11 @@ function formationYOffset(formation, i, count) {
 // Z:把多种敌机类型按数量交错排成一份出场序列(轮转分配,而非先出完A类再出B类)
 // X3:mult 给 preBoss 波次按难度放大数量用;向上取整避免难度系数把个位数怪缩没了
 function buildMixPlan(mix, mult = 1) {
-  const pools = mix.map(m => ({ type: m.type, left: Math.max(1, Math.round(m.count * mult)) })), plan = [];
+  const pools = mix.map(m => ({ type: m.type, elite: m.elite, left: Math.max(1, Math.round(m.count * mult)) })), plan = [];
   let any = true;
   while (any) {
     any = false;
-    for (const p of pools) { if (p.left > 0) { plan.push(p.type); p.left--; any = true; } }
+    for (const p of pools) { if (p.left > 0) { plan.push({ type: p.type, elite: p.elite }); p.left--; any = true; } }
   }
   return plan;
 }
@@ -160,11 +160,11 @@ const director = {
     if (!this.started) { this.started = true; this.beginStep(s); }
     if (s.wait != null) { this.timer -= dt; if (this.timer <= 0) this.next(); }
     else if (s.spawn) {
-      if (this.left > 0) { this.timer -= dt; if (this.timer <= 0) { const total = this.spawnTotal, i = total - this.left, r = CONFIG.enemy[s.spawn].radius; game.enemies.push(pools.enemy.get(s.spawn, formationX(s.formation, i, total, r), formationYOffset(s.formation, i, total), s.move)); this.left--; this.timer = s.gap || 0; } }
+      if (this.left > 0) { this.timer -= dt; if (this.timer <= 0) { const total = this.spawnTotal, i = total - this.left, r = CONFIG.enemy[s.spawn].radius; game.enemies.push(pools.enemy.get(s.spawn, formationX(s.formation, i, total, r), formationYOffset(s.formation, i, total), s.move, s.elite)); this.left--; this.timer = s.gap || 0; } }
       if (this.left <= 0) this.next();
     }
     else if (s.spawnMix) {
-      if (this.mixLeft > 0) { this.timer -= dt; if (this.timer <= 0) { const total = this.mixPlan.length, idx = total - this.mixLeft, type = this.mixPlan[idx], r = CONFIG.enemy[type].radius; game.enemies.push(pools.enemy.get(type, formationX(s.formation, idx, total, r), formationYOffset(s.formation, idx, total), s.move)); this.mixLeft--; this.timer = s.gap || 0; } }
+      if (this.mixLeft > 0) { this.timer -= dt; if (this.timer <= 0) { const total = this.mixPlan.length, idx = total - this.mixLeft, entry = this.mixPlan[idx], type = entry.type, elite = s.elite || entry.elite, r = CONFIG.enemy[type].radius; game.enemies.push(pools.enemy.get(type, formationX(s.formation, idx, total, r), formationYOffset(s.formation, idx, total), s.move, elite)); this.mixLeft--; this.timer = s.gap || 0; } }
       if (this.mixLeft <= 0) this.next();
     }
     else if (s.powerup) this.next();

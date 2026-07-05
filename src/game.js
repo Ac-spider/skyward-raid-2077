@@ -7,7 +7,7 @@ const game = {
   state: "title", diff: CONFIG.difficulties.normal, ship: CONFIG.ships.balanced, currentLevel: 0, world: 1, player: null, boss: null,
   playerBullets: [], homingShots: [], missiles: [], playerLasers: [], enemyBullets: [], enemies: [], powerups: [], particles: [], floats: [], lasers: [], shockwaves: [], specialWaves: [],
   score: 0, combo: 0, comboTimer: 0, maxCombo: 0,
-  threat: 0, chips: {}, _chipCursor: 0, _noHitT: 0,
+  threat: 0, chips: {}, bonuses: {}, _chipCursor: 0, _chipChoices: [], _chipRerolls: 0, _bonusKillN: 0, _noHitT: 0, _emergencyBarrierCd: 0, _chipStats: {}, _bonusStats: {}, _maxThreatLevel: 0,
   flashTimer: 0, bannerText: "", bannerSub: "", bannerTimer: 0, warningTimer: 0, titleT: 0, _sliderDrag: false,
   dlgName: "", dlgText: "", dlgTimer: 0,   // P:BOSS 台词
   topScores: [], _recorded: false,
@@ -24,13 +24,14 @@ const game = {
   _mapScrollY: 0, _mapDragStartX: 0, _mapDragStartY: 0, _mapDragStartScrollY: 0, _mapDragging: false, _mapDragMoved: false,
   _mapHighlightId: null, _mapHighlightT: 0,   // MM:从图鉴跳转过来时高亮提示的关卡
   _levelTransX: 0, _levelTransY: 0, _levelTransT: 0,   // NN:进入关卡的聚焦扩散过渡(从点击处展开)
-  autoNext: true, endless: false, challengeSeed: "", challengeMode: false, challengeDaily: false, challengeTarget: null, challengeSplits: [], _rng: null, _endlessT: 0, _endlessSpawnT: 0, _endlessBossT: 0, _endlessBossN: 0,
+  autoNext: true, endless: false, challengeSeed: "", challengeMode: false, challengeDaily: false, challengeTarget: null, challengeSplits: [], rivalInterference: null, _rng: null, _endlessT: 0, _endlessSpawnT: 0, _endlessBossT: 0, _endlessBossN: 0, _endlessEventT: 0, _endlessEventTimer: 0, _endlessEvent: null, _endlessEventsSeen: [], _endlessStats: null, _endlessTimeline: [], _endlessMarkIdx: 0,
   _shake: 0, _shakeT: 0, _hitStopT: 0,   // N:打击感
   // 触控按钮放大,便于拇指操作
   bombBtn: { x: 58, y: CONFIG.HEIGHT - 70, r: 42 },
   pauseBtn: { x: CONFIG.WIDTH - 58, y: CONFIG.HEIGHT - 70, r: 38 },
   settleBtn: { x: CONFIG.WIDTH / 2, y: CONFIG.HEIGHT - 70, r: 34 },
   specialBtn: { x: 150, y: CONFIG.HEIGHT - 70, r: 34 },
+  chargeBtn: { x: CONFIG.WIDTH - 150, y: CONFIG.HEIGHT - 70, r: 34 },
 
   // ── 流程 ──
   levelDef() { return LEVELS[this.currentLevel]; },
@@ -128,7 +129,7 @@ const game = {
   pauseButtonHit(x, y) { const b = this.pauseBtn; return (x - b.x) ** 2 + (y - b.y) ** 2 <= b.r * b.r; },
   // 开始某一关(索引)
   startLevel(i) {
-    this.currentLevel = i; this.world = LEVELS[i].world; this.endless = false; this.challengeSeed = ""; this.challengeMode = false; this.challengeDaily = false; this.challengeTarget = null; this.challengeSplits = []; this._rng = null;
+    this.currentLevel = i; this.world = LEVELS[i].world; this.endless = false; this.challengeSeed = ""; this.challengeMode = false; this.challengeDaily = false; this.challengeTarget = null; this.challengeSplits = []; this.rivalInterference = null; this._rng = null; this._endlessEvent = null; this._endlessEventTimer = 0; this._endlessEventT = 0; this._endlessEventsSeen = []; this._endlessStats = null; this._endlessTimeline = []; this._endlessMarkIdx = 0;
     this.state = "playing";
     this.player = new Player(); this.boss = null;
     this.playerBullets = []; this.homingShots = []; this.missiles = []; this.playerLasers = []; this.enemyBullets = []; this.enemies = []; this.powerups = []; this.particles = []; this.floats = []; this.lasers = []; this.shockwaves = []; this.specialWaves = [];
@@ -155,7 +156,7 @@ const game = {
   // F:无尽生存模式
   startEndless(opts = {}) {
     if (opts.ship && CONFIG.ships[opts.ship]) this.setShip(opts.ship);
-    this.endless = true; this.challengeSeed = opts.seed || Challenge.randomSeed(); this.challengeMode = !!opts.challenge; this.challengeDaily = !!opts.daily; this.challengeTarget = opts.target || null; this.challengeSplits = []; this._rng = Challenge.rng(this.challengeSeed);
+    this.endless = true; this.challengeSeed = opts.seed || Challenge.randomSeed(); this.challengeMode = !!opts.challenge; this.challengeDaily = !!opts.daily; this.challengeTarget = opts.target || null; this.challengeSplits = []; this.rivalInterference = (typeof RivalInterference !== "undefined") ? RivalInterference.create(this.challengeTarget) : null; this._rng = Challenge.rng(this.challengeSeed);
     this.farming = false; this._reached = false; this.currentLevel = 0; this.world = 1;
     this.state = "playing";
     this.player = new Player(); this.boss = null;
@@ -163,38 +164,109 @@ const game = {
     this.score = 0; this.combo = 0; this.comboTimer = 0; this.maxCombo = 0;
     this.resetDepthSystems();
     this.flashTimer = 0; this.warningTimer = 0; this._hpTrailRatio = 1;
-    this._endlessT = 0; this._endlessSpawnT = 1.0; this._endlessBossT = 30; this._endlessBossN = 0;
+    this._endlessT = 0; this._endlessSpawnT = CONFIG.endless.spawn.initialDelay; this._endlessBossT = CONFIG.endless.boss.firstDelay; this._endlessBossN = 0;
+    this._endlessEvent = null; this._endlessEventTimer = 0; this._endlessEventT = CONFIG.endless.eventInterval * 0.65; this._endlessEventsSeen = [];
+    this.resetEndlessTelemetry();
     director.begin(null);
     input.targetX = CONFIG.player.startX; input.targetY = CONFIG.player.startY;
     Sound.start(); Music.play(); this.banner(this.challengeMode ? "挑战模式" : "无尽模式", this.challengeDaily ? "每日空域" : (this.challengeMode ? "同种子竞速" : ""));
     Achievements.trackShipUse(this.ship.key);   // OO
   },
+  endlessPool(t) {
+    const pools = CONFIG.endless.pools;
+    const row = pools.find(p => p.until == null || t < p.until) || pools[pools.length - 1];
+    return row.enemies;
+  },
+  endlessSpawnInterval(t) {
+    const s = CONFIG.endless.spawn;
+    return Math.max(s.intervalMin, s.intervalBase - t * s.intervalDecay);
+  },
+  endlessSpawnCount(t) {
+    const s = CONFIG.endless.spawn;
+    return s.countBase + Math.min(s.countStepMax, Math.floor(t / s.countStepSec));
+  },
+  activeEndlessEvent() { return this.endless && this._endlessEventTimer > 0 ? this._endlessEvent : null; },
+  endlessEventValue(prop, fallback = 0) {
+    const e = this.activeEndlessEvent();
+    return e && e[prop] != null ? e[prop] : fallback;
+  },
+  triggerEndlessEvent() {
+    const events = CONFIG.endless.events || [];
+    if (!events.length) return;
+    const pool = this._endlessEvent ? events.filter(e => e.key !== this._endlessEvent.key) : events;
+    const e = this.pick(pool.length ? pool : events);
+    this._endlessEvent = e; this._endlessEventTimer = CONFIG.endless.eventDuration; this._endlessEventT = CONFIG.endless.eventInterval;
+    this._endlessEventsSeen.push(e.name || e.key);
+    if (this._endlessStats) this._endlessStats.events++;
+    this.banner(e.name, e.sub || "空域变化");
+    Sound.powerup();
+  },
+  updateEndlessEvent(dt) {
+    if (this._endlessEventTimer > 0) {
+      this._endlessEventTimer -= dt;
+      if (this._endlessEventTimer <= 0) this._endlessEvent = null;
+    }
+    this._endlessEventT -= dt;
+    if (this._endlessEventT <= 0) this.triggerEndlessEvent();
+  },
+  updateRivalInterference() {
+    if (!this.rivalInterference || typeof RivalInterference === "undefined") return;
+    const event = RivalInterference.next(this.rivalInterference, this._endlessT);
+    if (event) this.applyRivalInterference(event);
+  },
+  applyRivalInterference(event) {
+    this.banner("RIVAL 干扰", event.label);
+    if (event.type === "crossfire") {
+      const lanes = Math.min(4 + event.points, 7), y = 92;
+      for (let i = 0; i < lanes; i++) {
+        const fromLeft = i % 2 === 0, x = fromLeft ? 18 : CONFIG.WIDTH - 18;
+        const vy = 150 + event.points * 12, vx = (fromLeft ? 1 : -1) * (95 + i * 10);
+        this.spawnEnemyBullet(x, y + i * 34, vx, vy, 1);
+      }
+    } else {
+      const type = event.type === "elite" ? "gunner" : this.pick(["small", "medium", "gunner"]);
+      const elite = event.type === "elite" ? this.pick(["shield", "charger"]) : null;
+      const count = event.type === "ambush" ? Math.min(2 + event.points, 5) : 1;
+      for (let i = 0; i < count && this.enemies.length < CONFIG.endless.maxEnemies; i++) {
+        const r = CONFIG.enemy[type].radius, x = r + 20 + this.rng() * (CONFIG.WIDTH - 2 * (r + 20));
+        this.enemies.push(pools.enemy.get(type, x, i * 18, this.pick(CONFIG.endless.moves || ["sine", "zigzag", "dive", "straight"]), elite));
+      }
+    }
+    Sound.tone(520, 0.12, "sawtooth", 0.12, 180);
+  },
   updateEndless(dt) {
     this._endlessT += dt;
     this.recordChallengeSplits();
-    this.world = 1 + (Math.floor(this._endlessT / 40) % CONFIG.themes.length);   // 背景随时间轮换
+    this.recordEndlessTelemetry();
+    this.updateEndlessEvent(dt);
+    this.updateRivalInterference();
+    this.world = 1 + (Math.floor(this._endlessT / CONFIG.endless.worldInterval) % CONFIG.themes.length);   // 背景随时间轮换
     this._endlessSpawnT -= dt;
     if (this._endlessSpawnT <= 0 && this.enemies.length < CONFIG.endless.maxEnemies) {
       const t = this._endlessT;
-      this._endlessSpawnT = Math.max(0.8, 1.8 - t * 0.008);
-      const n = Math.min(2 + Math.min(5, Math.floor(t / 15)), CONFIG.endless.maxEnemies - this.enemies.length);   // 不超同屏上限
-      // W2:t>=250 再加一档,carrier 权重继续往上提,长线存活的玩家会越来越常遇到"一炸一窝"的母舰,难度持续爬坡而不是160秒后封顶
-      const pool = t < 20 ? ["small", "small", "medium"] : t < 50 ? ["small", "medium", "medium", "large", "gunner"] : t < 100 ? ["small", "medium", "large", "gunner", "splitter"] : t < 160 ? ["small", "medium", "large", "gunner", "splitter", "sniper", "detonator"] : t < 250 ? ["small", "medium", "large", "gunner", "splitter", "sniper", "detonator", "phantom", "phantom", "carrier"] : ["small", "medium", "large", "gunner", "splitter", "sniper", "detonator", "phantom", "phantom", "carrier", "carrier", "carrier"];
-      const moves = ["sine", "zigzag", "dive", "straight", "swoop", "orbit"];
-      for (let i = 0; i < n; i++) { const type = this.pick(pool), r = CONFIG.enemy[type].radius; this.enemies.push(pools.enemy.get(type, r + 20 + this.rng() * (CONFIG.WIDTH - 2 * (r + 20)), 0, this.pick(moves))); }
-      if (this.rng() < 0.12) this.spawnPowerUp(30 + this.rng() * (CONFIG.WIDTH - 60), this.chooseDrop());
+      this._endlessSpawnT = this.endlessSpawnInterval(t);
+      const n = Math.min(this.endlessSpawnCount(t) + this.endlessEventValue("spawnBonus", 0), CONFIG.endless.maxEnemies - this.enemies.length);   // 不超同屏上限
+      const pool = this.endlessPool(t), moves = CONFIG.endless.moves;
+      for (let i = 0; i < n; i++) {
+        const type = this.pick(pool), r = CONFIG.enemy[type].radius;
+        const elite = type !== "small" && this.rng() < this.endlessEventValue("eliteChance", 0) ? this.pick(["shield", "charger"]) : null;
+        this.enemies.push(pools.enemy.get(type, r + 20 + this.rng() * (CONFIG.WIDTH - 2 * (r + 20)), 0, this.pick(moves), elite));
+      }
+      if (this.rng() < CONFIG.endless.powerupChance + this.endlessEventValue("powerupChanceAdd", 0)) this.spawnPowerUp(30 + this.rng() * (CONFIG.WIDTH - 60), this.endlessEventValue("forceDrop", null) || this.chooseDrop());
     }
     this._endlessBossT -= dt;
-    if (this._endlessBossT <= 0 && !this.boss) { this._endlessBossT = 35; this.spawnBoss(this._endlessBossN % CONFIG.bosses.length); this._endlessBossN++; }
+    if (this._endlessBossT <= 0 && !this.boss) { this._endlessBossT = CONFIG.endless.boss.interval; this.spawnBoss(this._endlessBossN % CONFIG.bosses.length); this._endlessBossN++; }
   },
   settleEndless() {
+    this.recordEndlessTelemetry();
+    this.recordFinalEndlessTelemetry();
     const final = Math.round(this.score * this.activeDiff.scoreMult);
     const time = Math.floor(this._endlessT);
     const splits = this.challengeSplits.slice();
     const previousBest = ChallengeHistory.best(this.challengeSeed, this.ship.key);
-    const challengeCode = Challenge.encode({ seed: this.challengeSeed, ship: this.ship.key, score: final, time, combo: this.maxCombo, splits });
+    const challengeCode = Challenge.encode({ seed: this.challengeSeed, ship: this.ship.key, score: final, time, combo: this.maxCombo, splits, rulesVersion: CONFIG.challenge.rulesVersion });
     const best = ChallengeHistory.submit({ seed: this.challengeSeed, ship: this.ship.key, score: final, time, combo: this.maxCombo, splits, code: challengeCode, daily: this.challengeDaily });
-    this.endlessResult = { base: this.score, diffFactor: this.activeDiff.scoreMult, time, final, maxCombo: this.maxCombo, splits, challengeCode, challengeSeed: this.challengeSeed, challengeMode: this.challengeMode, challengeDaily: this.challengeDaily, target: this.challengeTarget, best, newBest: !previousBest || final > previousBest.score };
+    this.endlessResult = { base: this.score, diffFactor: this.activeDiff.scoreMult, time, final, maxCombo: this.maxCombo, splits, challengeCode, challengeSeed: this.challengeSeed, challengeMode: this.challengeMode, challengeDaily: this.challengeDaily, target: this.challengeTarget, rival: (typeof RivalInterference !== "undefined") ? RivalInterference.summary(this.rivalInterference) : null, events: this._endlessEventsSeen.slice(), chips: Object.assign({}, this._chipStats), bonuses: Object.assign({}, this._bonusStats), telemetry: Object.assign({}, this._endlessStats || {}), timeline: this._endlessTimeline.slice(), maxThreat: this._maxThreatLevel, best, newBest: !previousBest || final > previousBest.score };
     this.endlessTop = EndlessBoard.submit(final);
     this.state = "endlessover";
     Achievements.checkEndlessEnd({ time: this._endlessT, maxCombo: this.maxCombo });   // OO
@@ -203,7 +275,35 @@ const game = {
     this.showChallengeModal();
   },
   startDailyChallenge() { this.startEndless({ seed: Challenge.dailySeed(), challenge: true, daily: true }); },
-  challengeSplitMarks() { return [30, 60, 120]; },
+  challengeSplitMarks() { return CONFIG.challenge.splits; },
+  resetEndlessTelemetry() {
+    this._endlessStats = { kills: 0, bossKills: 0, hits: 0, blocked: 0, damageTaken: 0, bombs: 0, drafts: 0, picks: 0, skips: 0, rerolls: 0, events: 0 };
+    this._endlessTimeline = []; this._endlessMarkIdx = 0;
+  },
+  endlessTelemetryMarks() { return [60, 120, 180, 300]; },
+  endlessTelemetrySnapshot(t) {
+    const s = this._endlessStats, p = this.player, hp = p && p.maxHp ? Math.round(p.hp / p.maxHp * 100) : 0;
+    return { t, score: Math.round(this.score * this.activeDiff.scoreMult), kills: s.kills, boss: s.bossKills, hits: s.hits, dmg: Math.round(s.damageTaken), drafts: s.drafts || 0, picks: s.picks || 0, skips: s.skips || 0, rerolls: s.rerolls || 0, threat: this.threatLevel(), hp };
+  },
+  recordEndlessTelemetry() {
+    if (!this.endless || !this._endlessStats) return;
+    const marks = this.endlessTelemetryMarks();
+    while (this._endlessMarkIdx < marks.length && this._endlessT >= marks[this._endlessMarkIdx]) {
+      this._endlessTimeline.push(this.endlessTelemetrySnapshot(marks[this._endlessMarkIdx]));
+      this._endlessMarkIdx++;
+    }
+  },
+  recordFinalEndlessTelemetry() {
+    if (!this.endless || !this._endlessStats) return;
+    const t = Math.floor(this._endlessT), last = this._endlessTimeline[this._endlessTimeline.length - 1];
+    if (t > 0 && (!last || last.t !== t)) this._endlessTimeline.push(this.endlessTelemetrySnapshot(t));
+  },
+  recordEndlessDamage(amount, blocked) {
+    if (!this.endless || !this._endlessStats) return;
+    this._endlessStats.hits++;
+    if (blocked) this._endlessStats.blocked++;
+    this._endlessStats.damageTaken += Math.max(0, amount || 0);
+  },
   recordChallengeSplits() {
     const marks = this.challengeSplitMarks();
     while (this.challengeSplits.length < marks.length && this._endlessT >= marks[this.challengeSplits.length]) {
@@ -364,24 +464,169 @@ const game = {
   showDialogue(name, text, dur) { this.dlgName = name; this.dlgText = text || ""; this.dlgTimer = dur || 3.5; },   // P
   addShake(mag, t) { this._shake = Math.max(this._shake, mag); this._shakeT = Math.max(this._shakeT, t); },   // N
   hitStop(t) { this._hitStopT = Math.max(this._hitStopT, t); },
-  resetDepthSystems() { this.threat = 0; this.chips = {}; this._chipCursor = 0; this._noHitT = 0; },
+  resetDepthSystems() { this.threat = 0; this.chips = {}; this.bonuses = {}; this._chipCursor = 0; this._chipChoices = []; this._chipRerolls = 0; this._bonusKillN = 0; this._noHitT = 0; this._emergencyBarrierCd = 0; this._chipStats = {}; this._bonusStats = {}; this._maxThreatLevel = 0; },
   maxThreat() { return CONFIG.threat.maxLevel * CONFIG.threat.perLevel; },
   threatLevel() { return clamp(Math.floor(this.threat / CONFIG.threat.perLevel), 0, CONFIG.threat.maxLevel); },
-  threatScoreMult() { return 1 + this.threatLevel() * CONFIG.threat.scoreStep; },
+  threatScoreMult() {
+    let m = 1 + this.threatLevel() * CONFIG.threat.scoreStep;
+    m *= 1 + this.chipValue("volatileCore", "scoreBonus", 0);
+    m *= 1 + this.endlessEventValue("scoreBonus", 0);
+    return m;
+  },
   threatDamageMult() { return 1 + this.threatLevel() * (CONFIG.threat.damageStep || 0); },
-  addThreat(n) { this.threat = clamp(this.threat + n, 0, this.maxThreat()); },
+  threatGainMult() { return this.chipValue("volatileCore", "threatGainMult", 1) * this.endlessEventValue("threatGainMult", 1); },
+  addThreat(n) {
+    this.threat = clamp(this.threat + n * (n > 0 ? this.threatGainMult() : 1), 0, this.maxThreat());
+    this._maxThreatLevel = Math.max(this._maxThreatLevel || 0, this.threatLevel());
+  },
   dropThreat(n) { this.threat = clamp(this.threat - n, 0, this.maxThreat()); },
   chipActive(key) { return (this.chips[key] || 0) > 0; },
   chipValue(key, prop, fallback) { const c = CONFIG.chips[key]; return this.chipActive(key) && c && c[prop] != null ? c[prop] : fallback; },
+  bonusStacks(key) { return this.bonuses[key] || 0; },
+  bonusValue(key, prop, fallback = 0) { const b = CONFIG.bonuses[key]; return b && b[prop] ? this.bonusStacks(key) * b[prop] : fallback; },
+  adrenalineValue(prop) {
+    const b = CONFIG.bonuses.adrenaline, p = this.player;
+    return b && p && p.maxHp && p.hp / p.maxHp <= b.threshold ? this.bonusStacks("adrenaline") * (b[prop] || 0) : 0;
+  },
+  mainBulletDamage() { return CONFIG.bullet.damage + this.bonusValue("kineticAmmo", "bulletDamage"); },
+  playerDamage(d, target = null) {
+    let m = 1 + this.bonusValue("damage", "damageMult") + this.bonusValue("glassCannon", "damageMult") + this.adrenalineValue("damageMult");
+    if (target && target.isBoss) m += this.bonusValue("bossHunter", "bossDamageMult");
+    if (target && target.maxHp && target.hp / target.maxHp <= (CONFIG.bonuses.executioner.threshold || 0)) m += this.bonusValue("executioner", "damageMult");
+    return d * m;
+  },
+  weaponCooldownMult() { return Math.max(0.45, 1 - this.bonusValue("fireRate", "cooldownMult") - this.bonusValue("overdrive", "cooldownMult") - this.adrenalineValue("cooldownMult")); },
+  damageTakenMult() { return 1 + this.bonusValue("glassCannon", "damageTakenMult") + this.bonusValue("overdrive", "damageTakenMult"); },
+  rangeMult() { return 1 + this.bonusValue("range", "rangeMult"); },
+  pickupRangeMult() { return this.rangeMult() * (1 + this.bonusValue("magnetCore", "magnetMult")); },
+  endlessEnemyHpMult() {
+    if (!this.endless) return 1;
+    const e = CONFIG.endless;
+    return 1 + Math.min(this._endlessT / e.enemyHpRampTime, 1) * (e.enemyHpRampMult - 1);
+  },
+  shipWeaponValue(prop, fallback) {
+    const b = ((this.player && this.player.ship) || this.ship).weaponBias || {};
+    return b[prop] != null ? b[prop] : fallback;
+  },
   activateChip(key, msg) {
     const c = CONFIG.chips[key]; if (!c) return;
     this.chips[key] = Math.max(this.chips[key] || 0, c.duration);
+    this._chipStats[key] = (this._chipStats[key] || 0) + 1;
     this.floats.push(new FloatText(this.player.x, this.player.y - 48, msg || c.name, c.color));
     this.addThreat(CONFIG.threat.overflowGain);
   },
   activateNextChip() {
     const order = CONFIG.chipOrder, key = order[this._chipCursor++ % order.length];
     this.activateChip(key, "芯片 " + CONFIG.chips[key].name);
+    return key;
+  },
+  activateBonus(key) {
+    const b = CONFIG.bonuses[key]; if (!b) return;
+    this.bonuses[key] = (this.bonuses[key] || 0) + 1;
+    this._bonusStats[key] = (this._bonusStats[key] || 0) + 1;
+    if (key === "maxHp" && this.player) { this.player.maxHp += b.hp; this.player.hp = clamp(this.player.hp + b.hp, 0, this.player.maxHp); }
+    if (this.player) this.floats.push(new FloatText(this.player.x, this.player.y - 50, "BONUS " + b.name, b.color));
+  },
+  cardInfo(id) {
+    const parts = id.split(":"), type = parts[0], key = parts[1], src = type === "chip" ? CONFIG.chips[key] : CONFIG.bonuses[key];
+    return src ? { type, key, name: src.name, desc: src.desc || "", color: src.color || "#4dabf7", rarity: src.rarity || "普通", weight: src.weight || 100 } : null;
+  },
+  chipChoiceRect(i) { return { x: 40, y: 238 + i * 104, w: CONFIG.WIDTH - 80, h: 92 }; },
+  chipChoiceHit(px, py) {
+    for (let i = 0; i < 3; i++) { const r = this.chipChoiceRect(i); if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return i; }
+    return -1;
+  },
+  chipActionRect(kind) { return kind === "reroll" ? { x: 120, y: 562, w: 132, h: 38 } : { x: 288, y: 562, w: 132, h: 38 }; },
+  chipActionHit(px, py) {
+    for (const kind of ["reroll", "skip"]) { const r = this.chipActionRect(kind); if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return kind; }
+    return "";
+  },
+  drawChipChoices(exclude = []) {
+    const skip = new Set(exclude);
+    const pool = CONFIG.chipOrder.map(k => "chip:" + k).concat(CONFIG.bonusOrder.map(k => "bonus:" + k)).filter(id => !skip.has(id));
+    this._chipChoices = [];
+    while (this._chipChoices.length < 3 && pool.length) {
+      const total = pool.reduce((s, id) => s + ((this.cardInfo(id) || {}).weight || 0), 0);
+      if (total <= 0) break;
+      let r = this.rng() * total, i = 0;
+      for (; i < pool.length - 1; i++) { r -= (this.cardInfo(pool[i]) || {}).weight || 0; if (r <= 0) break; }
+      this._chipChoices.push(pool.splice(i, 1)[0]);
+    }
+  },
+  beginChipDraft() {
+    if (!this.endless) return this.activateNextChip();
+    if (this._endlessStats) this._endlessStats.drafts++;
+    this._chipRerolls = 1;
+    this.drawChipChoices();
+    this.state = "chipselect";
+    return null;
+  },
+  rerollChipDraft() {
+    if (this.state !== "chipselect" || this._chipRerolls <= 0) return false;
+    this._chipRerolls--;
+    if (this._endlessStats) this._endlessStats.rerolls++;
+    this.drawChipChoices(this._chipChoices);
+    Sound.powerup();
+    return true;
+  },
+  skipChipDraft() {
+    if (this.state !== "chipselect") return false;
+    if (this._endlessStats) this._endlessStats.skips++;
+    this._chipChoices = [];
+    this._chipRerolls = 0;
+    this.state = "playing";
+    const gain = Math.round((CONFIG.overflow.score || 0) * 2 * this.threatScoreMult());
+    if (gain > 0) { this.score += gain; if (this.player) this.floats.push(new FloatText(this.player.x, this.player.y - 56, "跳过 +" + gain, "#adb5bd")); }
+    Sound.powerup();
+    return true;
+  },
+  chooseChip(i) {
+    const card = this.cardInfo(this._chipChoices[i] || "");
+    if (!card) return false;
+    if (this._endlessStats) this._endlessStats.picks++;
+    this._chipChoices = [];
+    this._chipRerolls = 0;
+    this.state = "playing";
+    if (card.type === "chip") this.activateChip(card.key, "芯片 " + card.name);
+    else this.activateBonus(card.key);
+    this.grantOverflowScore(card.color);
+    Sound.powerup();
+    return true;
+  },
+  claimChipReward() {
+    if (this.endless) { this.beginChipDraft(); return; }
+    const key = this.activateNextChip(), c = CONFIG.chips[key];
+    this.grantOverflowScore(c ? c.color : "#4dabf7");
+  },
+  triggerChainSpark(src) {
+    const stacks = this.bonusStacks("chainSpark");
+    if (!stacks) return;
+    const cfg = CONFIG.bonuses.chainSpark, target = this.nearestEnemy(src.x, src.y, cfg.range + stacks * 35);
+    if (!target) return;
+    const dmg = this.playerDamage(cfg.damage * stacks, target);
+    this.spawnHitSpark(target.x, target.y);
+    this.spawnShockwave(target.x, target.y, target.radius * 1.4, cfg.color);
+    this.floats.push(new FloatText(target.x, target.y - target.radius, "电弧 -" + Math.round(dmg), cfg.color));
+    if (target.damage(dmg)) this.onEnemyKilled(target);
+  },
+  triggerReactiveArmor(src) {
+    const stacks = this.bonusStacks("reactiveArmor");
+    if (!stacks) return;
+    const cfg = CONFIG.bonuses.reactiveArmor, range = cfg.range + stacks * 24;
+    this.spawnShockwave(src.x, src.y, range, cfg.color);
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      const dx = e.x - src.x, dy = e.y - src.y, rr = range + e.radius;
+      if (dx * dx + dy * dy <= rr * rr && e.damage(this.playerDamage(cfg.damage * stacks, e))) this.onEnemyKilled(e);
+    }
+  },
+  tryEmergencyBarrier(p) {
+    const stacks = this.bonusStacks("emergencyBarrier"), cfg = CONFIG.bonuses.emergencyBarrier;
+    if (!stacks || this._emergencyBarrierCd > 0 || !p || p.hp <= 0 || p.hp / p.maxHp > cfg.threshold) return;
+    p.grantShield(Math.min(cfg.maxShield, p.shieldHp + cfg.shield * stacks), cfg.dur);
+    this._emergencyBarrierCd = cfg.cooldown;
+    this.floats.push(new FloatText(p.x, p.y - 58, "应急力场", cfg.color));
+    Sound.powerup();
   },
   updateDepthSystems(dt) {
     for (const key of Object.keys(this.chips)) {
@@ -390,6 +635,7 @@ const game = {
     }
     if (!this.player) return;
     this._noHitT += dt;
+    if (this._emergencyBarrierCd > 0) this._emergencyBarrierCd -= dt;
     const t = CONFIG.threat;
     if (this.player.power >= CONFIG.player.maxPower && this.player.overcharge >= CONFIG.player.maxOvercharge) this.addThreat(t.fullPowerPerSec * dt);
     if (this.combo >= t.comboTrigger) this.addThreat(t.comboPerSec * dt);
@@ -414,14 +660,56 @@ const game = {
     }
     return best;
   },
+  jamFactor(x, y) {
+    let slow = 1;
+    for (const e of this.enemies) {
+      if (e.dead || e.type !== "jammer" || e.y < -e.radius) continue;
+      const r = e.cfg.jamRadius || 0, dx = e.x - x, dy = e.y - y;
+      if (dx * dx + dy * dy <= r * r) slow = Math.max(slow, e.cfg.weaponSlow || 1);
+    }
+    return slow;
+  },
+  repairNearbyEnemies(src) {
+    const r = src.cfg.repairRadius || 0, amt = src.cfg.repairAmount || 0;
+    let repaired = 0;
+    for (const e of this.enemies) {
+      if (e.dead || e === src || e.isBoss || !e.maxHp || e.hp >= e.maxHp) continue;
+      const dx = e.x - src.x, dy = e.y - src.y;
+      if (dx * dx + dy * dy > r * r) continue;
+      e.hp = Math.min(e.maxHp, e.hp + amt); repaired++;
+      this.spawnHitSpark(e.x, e.y);
+    }
+    if (repaired) {
+      this.spawnShockwave(src.x, src.y, r, src.color);
+      this.floats.push(new FloatText(src.x, src.y - src.radius - 14, "修复 +" + repaired, src.color));
+      Sound.tone(440, 0.08, "sine", 0.1, 220);
+    }
+    return repaired;
+  },
   // W2:无尽模式 BOSS 血量按已刷出过的 BOSS 场次数递增(每场 +8%,封顶12场即+96%),让长线存活不会一直打同样血量的 BOSS 车轮战
   spawnBoss(defIndex) {
     const b = new Boss(defIndex);
-    if (this.endless) { const mult = 1 + Math.min(this._endlessBossN, 12) * 0.08; b.maxHp = Math.round(b.maxHp * mult); b.hp = b.maxHp; }
+    if (this.endless) {
+      const cfg = CONFIG.endless.boss, mult = 1 + Math.min(this._endlessBossN, cfg.hpStepMax) * cfg.hpStep;
+      b.maxHp = Math.round(b.maxHp * mult); b.hp = b.maxHp;
+    }
     this.enemies.push(b); this.boss = b; this.warningTimer = 2.2; this.showDialogue(b.def.name, b.def.taunt, 3.8); return b;
   },
   // Y:BOSS 狂暴触发提示(HP<=20% 时一次性)
   onBossEnrage(b) { this.showDialogue(b.def.name, "狂暴!攻击频率大幅提升!", 3.0); this.addShake(6, 0.28); Sound.hit(); Haptics.bomb(); },
+  onBossPhaseChange(b, phaseIndex) {
+    if (phaseIndex <= 0) return;
+    const color = b.def.colors[phaseIndex] || "#ffd43b", kind = this.canDrop("chip") ? "chip" : "power";
+    b._fireTimer = Math.max(b._fireTimer, 1.1);
+    for (const bullet of this.enemyBullets) bullet.dead = true;
+    pruneDead(this.enemyBullets, releaseDead.enemyBullet);
+    this.lasers.length = 0;
+    this.powerups.push(new PowerUp(clamp(b.x, 40, CONFIG.WIDTH - 40), b.y + b.radius, kind));
+    this.spawnShockwave(b.x, b.y, b.radius * 3, color);
+    this.floats.push(new FloatText(b.x, b.y - b.radius - 16, "阶段 " + (phaseIndex + 1) + " 窗口", color));
+    this.showDialogue(b.def.name, "装甲破裂!短暂补给窗口!", 2.2);
+    this.addShake(5, 0.22); Sound.powerup();
+  },
   // Y:镭射攻击 —— warn 秒预警(半透明红条)后进入 dur 秒的伤害柱,期间站在范围内会持续受伤(复用玩家受击无敌帧天然限制伤害频率)
   spawnBossLaser(x, warn, dur, width, dmg) { this.lasers.push({ x, warn, dur, width, dmg, t: 0, phase: "warn", dead: false }); },
   updateLasers(dt) {
@@ -480,6 +768,7 @@ const game = {
   useBomb() {
     if (!this.player || this.player.bombs <= 0) return;
     this.player.bombs--; this._bombsUsedThisLevel++; Sound.bomb(); Haptics.bomb(); this.addShake(6, 0.2); this.hitStop(0.04);
+    if (this._endlessStats) this._endlessStats.bombs++;
     this.dropThreat(CONFIG.threat.bombLoss);
     this.flashTimer = CONFIG.bomb.flash;
     this.player.invulnTimer = Math.max(this.player.invulnTimer, CONFIG.player.bombInvuln);
@@ -490,6 +779,37 @@ const game = {
       if (e.isBoss) { this.burst(e.x, e.y, "#fff", 24, 240); if (e.damage(CONFIG.bomb.bossDamage * (this.player.ship.bombDmgMult || 1))) this.onEnemyKilled(e, false, true); }
       else if (e.damage(9999)) this.onEnemyKilled(e, false, true);
     }
+  },
+
+  chargeButtonHit(x, y) { const b = this.chargeBtn; return (x - b.x) ** 2 + (y - b.y) ** 2 <= b.r * b.r; },
+  chargeReady() {
+    const p = this.player, c = CONFIG.charge;
+    return !!p && p.power >= c.minPower && p.chargeCooldown <= 0;
+  },
+  startCharge() {
+    if (!this.chargeReady()) return;
+    this.player.charging = true;
+    this.player.charge = Math.max(this.player.charge, 0.001);
+  },
+  releaseCharge() {
+    const p = this.player, c = CONFIG.charge;
+    if (!p || !p.charging) return;
+    if (this.state !== "playing") { p.charging = false; p.charge = 0; return; }
+    const charge = p.charge;
+    p.charging = false; p.charge = 0;
+    if (charge < c.min) return;
+    const ratio = clamp(charge / c.max, 0, 1);
+    const boost = Math.round(c.overchargeBase + c.overchargeBonus * ratio + (p.overcharge || 0) + this.chipValue("chargeCore", "boostBonus", 0) + this.shipWeaponValue("chargeBoostBonus", 0) + this.bonusValue("chargeAmp", "boostBonus"));
+    this.spawnPlayerLaser(p.x, p.y - p.radius, boost);
+    if (this.chipActive("sideGuns")) {
+      const sideBoost = Math.max(1, boost - 3);
+      this.spawnPlayerLaser(p.x - 34, p.y - p.radius, sideBoost);
+      this.spawnPlayerLaser(p.x + 34, p.y - p.radius, sideBoost);
+    }
+    p.chargeCooldown = c.cooldown * this.chipValue("chargeCore", "cooldownMult", 1) * this.shipWeaponValue("chargeCooldownMult", 1) * Math.max(0.55, 1 - this.bonusValue("chargeAmp", "cooldownMult"));
+    this.spawnShockwave(p.x, p.y - p.radius, 28 + ratio * 26, "#ffd43b");
+    this.floats.push(new FloatText(p.x, p.y - 42, "蓄力激光 " + Math.round(ratio * 100) + "%", "#ffd43b"));
+    Sound.laser(); Haptics.powerup();
   },
 
   // B:必杀 —— 能量满 + 冷却结束才可释放。X4:效果按机型分派(specialType),不再是所有机型统一的全屏重伤:
@@ -513,7 +833,7 @@ const game = {
     this.flashTimer = 0.5; this.player.invulnTimer = Math.max(this.player.invulnTimer, CONFIG.special.invuln);
     for (const e of this.enemies) {
       if (e.dead) continue;
-      if (e.isBoss) { this.burst(e.x, e.y, "#ffd43b", 30, 320); if (e.damage(CONFIG.special.bossDamage)) this.onEnemyKilled(e, false, true); }
+      if (e.isBoss) { this.burst(e.x, e.y, "#ffd43b", 30, 320); if (e.damage(this.playerDamage(CONFIG.special.bossDamage, e))) this.onEnemyKilled(e, false, true); }
       else if (e.damage(9999)) this.onEnemyKilled(e, false, true);
     }
   },
@@ -535,11 +855,19 @@ const game = {
   },
 
   onEnemyKilled(e, allowDrop = true, byBomb = false) {
+    if (this._endlessStats) { this._endlessStats.kills++; if (e.isBoss) this._endlessStats.bossKills++; }
     let gained;
     if (byBomb) { gained = Math.round(e.score * CONFIG.scoring.bombKillMult); }              // 炸弹/必杀清兵:不涨连击、分数打折
     else { this.combo++; this.comboTimer = CONFIG.combo.timeout * (this.player ? this.player.ship.comboTimeoutMult : 1); this.maxCombo = Math.max(this.maxCombo, this.combo); gained = Math.round(e.score * this.comboMult() * this.threatScoreMult()); this.addThreat(e.isBoss ? CONFIG.threat.bossKillGain : CONFIG.threat.killGain); }
     this.score += gained;
-    if (this.player && !byBomb) this.player.addEnergy(e.isBoss ? CONFIG.special.gainBossKill : CONFIG.special.gainPerKill);   // B:攒必杀能量(炸弹/必杀击杀不攒,防循环)
+    if (this.player && !byBomb) {
+      this._bonusKillN++;
+      this.player.addEnergy(e.isBoss ? CONFIG.special.gainBossKill : CONFIG.special.gainPerKill);   // B:攒必杀能量(炸弹/必杀击杀不攒,防循环)
+      const heal = this.bonusValue("leech", "heal");
+      if (heal > 0 && this.player.hp < this.player.maxHp) this.player.heal(heal);
+      const salvage = this.bonusStacks("salvage"), sc = CONFIG.bonuses.salvage;
+      if (salvage > 0 && this._bonusKillN % sc.every === 0) this.player.grantShield(Math.min(50, this.player.shieldHp + salvage * sc.shield), sc.dur);
+    }
     this.floats.push(new FloatText(e.x, e.y - e.radius, "+" + gained, byBomb ? "#868e96" : (this.combo >= 5 ? "#ffd43b" : "#fff")));
     // D:splitter 死亡裂成小型机(在死亡位置)
     if (e.type === "splitter") { for (let k = 0; k < (e.cfg.splits || 3); k++) { const off = (k - (e.cfg.splits - 1) / 2) * 26, ne = pools.enemy.get("small", clamp(e.x + off, 20, CONFIG.WIDTH - 20), 0, "straight"); ne.y = e.y; this.enemies.push(ne); } }
@@ -556,42 +884,60 @@ const game = {
     }
     if (e.isBoss) { for (let k = 0; k < 5; k++) this.burst(e.x + (Math.random() - 0.5) * e.radius, e.y + (Math.random() - 0.5) * e.radius, ["#ffd43b", "#ff922b", "#fff"][k % 3], 18, 260); this.spawnShockwave(e.x, e.y, e.radius * 3, "#ffd43b"); this.flashTimer = Math.max(this.flashTimer, 0.4); Sound.bossDefeat(); Haptics.bossDefeat(); this.addShake(9, 0.32); this.hitStop(0.08); Achievements.trackBossKill(e.defIndex); }
     else { this.burst(e.x, e.y, e.color, 14, 180); this.spawnShockwave(e.x, e.y, e.radius * 2.2, e.color); Sound.explosion(e.radius >= 30 ? "large" : e.radius >= 20 ? "medium" : "small"); if (allowDrop) this.maybeDrop(e.type, e.x, e.y); }
+    if (!byBomb) this.triggerChainSpark(e);
     // CC:连击每达 10 的倍数,弹一次居中大字里程碑特效
     if (!byBomb && this.combo > 0 && this.combo % 10 === 0) this.comboMilestone(this.combo);
   },
   comboMilestone(n) {
     // HH:按用户反馈取消了连击里程碑的震动(太频繁,叠加暂停期间的震动 BUG 感觉像屏幕一直在抖)
     this.bannerText = n + " COMBO!"; this.bannerSub = ""; this.bannerTimer = 1.1;
+    const stacks = this.bonusStacks("comboBattery"), cfg = CONFIG.bonuses.comboBattery;
+    if (stacks && this.player) {
+      this.player.addEnergy(cfg.energy * stacks);
+      this.player.grantShield(Math.min(48, this.player.shieldHp + cfg.shield * stacks), cfg.dur);
+      this.floats.push(new FloatText(this.player.x, this.player.y - 58, "连击电池", cfg.color));
+    }
     Sound.powerup();
   },
   maybeDrop(type, x, y) { if (type === "small") return; if (this.rng() < CONFIG.powerup.dropChance) this.powerups.push(new PowerUp(x, y, this.chooseDrop())); },
-  canDrop(kind) { return !!kind; },
+  canDrop(kind) {
+    if (kind !== "chip") return !!kind;
+    return !!this.player && (this.player.power >= CONFIG.powerup.chipMinPower || (this.endless && this._endlessT >= CONFIG.powerup.chipMinEndlessTime));
+  },
   chooseDrop() {
     const w = this.endless ? CONFIG.powerup.endlessWeights : CONFIG.powerup.weights;
-    const kinds = ["power", "heal", "bomb", "wing"].filter(k => this.canDrop(k));
-    const total = kinds.reduce((s, k) => s + w[k], 0);
+    const kinds = ["power", "heal", "bomb", "wing", "chip"].filter(k => this.canDrop(k));
+    const total = kinds.reduce((s, k) => s + (w[k] || 0), 0);
     if (total <= 0) return "heal";
     let r = this.rng() * total;
-    for (const k of kinds) { if (r < w[k]) return k; r -= w[k]; }
+    for (const k of kinds) { if (r < (w[k] || 0)) return k; r -= w[k] || 0; }
     return kinds[kinds.length - 1];
+  },
+  grantOverflowScore(color = "#ffd43b") {
+    const gain = Math.round((CONFIG.overflow.score || 0) * this.threatScoreMult());
+    if (gain <= 0 || !this.player) return;
+    this.score += gain;
+    this.floats.push(new FloatText(this.player.x, this.player.y - 62, "溢出 +" + gain, color));
   },
   collectPowerup(kind) {
     const p = this.player, o = CONFIG.overflow;
     if (kind === "power") {
-      if (p.power >= CONFIG.player.maxPower && p.overcharge >= CONFIG.player.maxOvercharge) this.activateNextChip();
+      if (p.power >= CONFIG.player.maxPower && p.overcharge >= CONFIG.player.maxOvercharge) this.claimChipReward();
       else {
         const wasMax = p.power >= CONFIG.player.maxPower;
         p.addPower();
         this.floats.push(new FloatText(p.x, p.y - 34, wasMax ? "过载 +" + p.overcharge : "火力 +1", wasMax ? "#74c0fc" : "#38d9a9"));
       }
+    } else if (kind === "chip") {
+      this.claimChipReward();
     } else if (kind === "bomb") {
-      if (p.bombs >= CONFIG.player.maxBombs) { p.addEnergy(o.bombEnergy); this.floats.push(new FloatText(p.x, p.y - 34, "能量 +" + o.bombEnergy, "#ffd43b")); this.addThreat(o.threatGain); }
+      if (p.bombs >= CONFIG.player.maxBombs) { p.addEnergy(o.bombEnergy); this.floats.push(new FloatText(p.x, p.y - 34, "能量 +" + o.bombEnergy, "#ffd43b")); this.addThreat(o.threatGain); this.grantOverflowScore("#ffd43b"); }
       else { p.addBomb(); this.floats.push(new FloatText(p.x, p.y - 34, "炸弹 +1", "#cc5de8")); }
     } else if (kind === "wing") {
-      if (p.wings >= CONFIG.wingMax) this.activateChip(o.wingChip, "侧翼炮组");
+      if (p.wings >= CONFIG.wingMax) { this.activateChip(o.wingChip, "侧翼炮组"); this.grantOverflowScore("#dee2e6"); }
       else { p.addWing(); this.floats.push(new FloatText(p.x, p.y - 34, "僚机 +1", "#dee2e6")); }
     } else {
-      if (p.hp >= p.maxHp) { p.grantShield(o.healShield, o.healShieldDur); this.floats.push(new FloatText(p.x, p.y - 34, "临时护盾 +" + o.healShield, "#74c0fc")); this.addThreat(o.threatGain); }
+      if (p.hp >= p.maxHp) { p.grantShield(o.healShield, o.healShieldDur); this.floats.push(new FloatText(p.x, p.y - 34, "临时护盾 +" + o.healShield, "#74c0fc")); this.addThreat(o.threatGain); this.grantOverflowScore("#74c0fc"); }
       else { p.heal(CONFIG.powerup.healAmount); this.floats.push(new FloatText(p.x, p.y - 34, "HP +" + CONFIG.powerup.healAmount, "#ff8787")); }
     }
   },
@@ -663,11 +1009,18 @@ const game = {
   resolveCollisions() {
     for (const b of this.playerBullets) {
       if (b.dead) continue;
-      for (const e of this.enemies) { if (e.dead) continue; if (hit(b, e)) { b.dead = true; this.spawnHitSpark(b.x, b.y); if (e.damage(CONFIG.bullet.damage)) this.onEnemyKilled(e); break; } }
+      for (const e of this.enemies) {
+        if (e.dead || b.hitEnemies.has(e)) continue;
+        if (!hit(b, e)) continue;
+        b.hitEnemies.add(e); this.spawnHitSpark(b.x, b.y);
+        if (e.damage(this.playerDamage(this.mainBulletDamage(), e))) this.onEnemyKilled(e);
+        if (b.pierce > 0) { b.pierce--; continue; }
+        b.dead = true; break;
+      }
     }
     for (const b of this.homingShots) {
       if (b.dead) continue;
-      for (const e of this.enemies) { if (e.dead) continue; if (hit(b, e)) { b.dead = true; this.spawnHitSpark(b.x, b.y); if (e.damage(b.damage)) this.onEnemyKilled(e); break; } }
+      for (const e of this.enemies) { if (e.dead) continue; if (hit(b, e)) { b.dead = true; this.spawnHitSpark(b.x, b.y); if (e.damage(this.playerDamage(b.damage, e))) this.onEnemyKilled(e); break; } }
     }
     for (const m of this.missiles) {
       if (m.dead) continue;
@@ -676,12 +1029,13 @@ const game = {
         if (!hit(m, e)) continue;
         m.dead = true; this.burst(m.x, m.y, "#ff922b", 12, 190); this.spawnShockwave(m.x, m.y, m.splash, "#ff922b");
         Sound.missileHit();
-        if (e.damage(m.damage)) this.onEnemyKilled(e);
+        const missileDmg = this.playerDamage(m.damage, e);
+        if (e.damage(missileDmg)) this.onEnemyKilled(e);
         const splashDmg = Math.max(1, Math.round(m.damage * 0.45));
         for (const other of this.enemies) {
           if (other.dead || other === e) continue;
           const dx = other.x - m.x, dy = other.y - m.y, rr = m.splash + other.radius;
-          if (dx * dx + dy * dy <= rr * rr && other.damage(splashDmg)) this.onEnemyKilled(other);
+          if (dx * dx + dy * dy <= rr * rr && other.damage(this.playerDamage(splashDmg, other))) this.onEnemyKilled(other);
         }
         break;
       }
@@ -694,7 +1048,7 @@ const game = {
         if (e.y <= l.y + e.radius && Math.abs(e.x - l.x) <= half + e.radius) {
           l.hitEnemies.add(e);
           this.spawnHitSpark(e.x, e.y);
-          if (e.damage(l.damage)) this.onEnemyKilled(e);
+          if (e.damage(this.playerDamage(l.damage, e))) this.onEnemyKilled(e);
         }
       }
     }
@@ -719,7 +1073,7 @@ const game = {
         if (e.dead || w.hitEnemies.has(e)) continue;
         if (Math.abs(e.x - w.x) <= halfW + e.radius && Math.abs(e.y - w.y) <= halfT + e.radius) {
           w.hitEnemies.add(e);
-          if (e.damage(CONFIG.special.waveDamage)) this.onEnemyKilled(e); else this.spawnHitSpark(e.x, e.y);
+          if (e.damage(this.playerDamage(CONFIG.special.waveDamage, e))) this.onEnemyKilled(e); else this.spawnHitSpark(e.x, e.y);
         }
       }
     }
@@ -797,12 +1151,95 @@ const game = {
       ctx.globalAlpha = 1;
     }
     if (this.warningTimer > 0 && this.state === "playing") this.drawWarning(ctx);
+    if (this.state === "chipselect") this._drawFaded(ctx, () => this.drawChipSelect(ctx));
     if (this.state === "paused") this._drawFaded(ctx, () => this.drawPause(ctx));
     if (this.state === "gameover") this._drawFaded(ctx, () => this.drawEndScreen(ctx, "战斗失败", "#ff6b6b"));
     if (this.state === "cleared") this._drawFaded(ctx, () => this.drawCleared(ctx));
     if (this.state === "settle") this._drawFaded(ctx, () => this.drawSettle(ctx));
     if (this.state === "endlessover") this._drawFaded(ctx, () => this.drawEndlessOver(ctx));
     if (sh > 0) ctx.restore();
+  },
+
+  drawRarityBadge(ctx, x, y, text, color) {
+    const w = Math.max(52, ctx.measureText(text).width + 20), h = 22;
+    ctx.save();
+    ctx.fillStyle = UI.rgba(color, .22); UI.roundRect(ctx, x - w, y - h + 2, w, h, 11); ctx.fill();
+    ctx.strokeStyle = UI.rgba(color, .78); ctx.lineWidth = 1.2; UI.roundRect(ctx, x - w, y - h + 2, w, h, 11); ctx.stroke();
+    ctx.fillStyle = color; ctx.textAlign = "center"; ctx.font = "bold 13px 'Segoe UI', sans-serif"; ctx.fillText(text, x - w / 2, y - 4);
+    ctx.restore();
+  },
+  drawChipCardIcon(ctx, card, x, y, r) {
+    const key = card.key, col = card.color;
+    UI.roundButton(ctx, x, y, r, col, { alpha: .86, stroke: UI.rgba(col, .9), lineWidth: 1.8 });
+    if (key.includes("missile") || key.includes("Payload")) this.drawSecondaryWeaponIcon(ctx, x, y, r * .9, "missile", "#fff");
+    else if (key.includes("laser") || key.includes("Lens")) this.drawSecondaryWeaponIcon(ctx, x, y, r * .9, "laser", "#fff");
+    else if (key.includes("homing") || key.includes("swarm")) this.drawSecondaryWeaponIcon(ctx, x, y, r * .9, "homing", "#fff");
+    else if (key.includes("shield") || key.includes("Armor") || key.includes("salvage") || key.includes("Barrier") || key === "capacitor") this.drawSpecialIcon(ctx, x, y, r * .86, "shield", "#fff");
+    else if (key.includes("charge") || key.includes("overdrive") || key.includes("Battery") || key.includes("fireRate")) this.drawChargeIcon(ctx, x, y, r * .9, "#fff");
+    else if (key.includes("range") || key.includes("magnet")) {
+      ctx.save(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; for (let i = 1; i <= 3; i++) { ctx.globalAlpha = 1 - i * .18; ctx.beginPath(); ctx.arc(x, y, r * (.22 + i * .18), 0, Math.PI * 2); ctx.stroke(); } ctx.restore();
+    } else if (key.includes("chain")) {
+      ctx.save(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.4; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(x - r * .45, y - r * .2); ctx.lineTo(x - r * .05, y + r * .05); ctx.lineTo(x - r * .2, y + r * .5); ctx.lineTo(x + r * .48, y - r * .12); ctx.stroke(); ctx.restore();
+    } else this.drawPowerIcon(ctx, x, y, r * .74);
+  },
+  drawChipActionButton(ctx, kind, label, color, disabled = false) {
+    const r = this.chipActionRect(kind), alpha = disabled ? .32 : .88;
+    UI.panel(ctx, r.x, r.y, r.w, r.h, 14, disabled ? { stroke: "rgba(255,255,255,.18)" } : { accent: color, top: UI.rgba(color, .18), bottom: "rgba(255,255,255,.03)" });
+    ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = disabled ? "#868e96" : color; ctx.fillStyle = disabled ? "#868e96" : "#fff"; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    const ix = r.x + 24, iy = r.y + r.h / 2;
+    if (kind === "reroll") { ctx.beginPath(); ctx.arc(ix, iy, 8, Math.PI * .2, Math.PI * 1.7); ctx.stroke(); ctx.beginPath(); ctx.moveTo(ix - 2, iy - 11); ctx.lineTo(ix + 7, iy - 10); ctx.lineTo(ix + 3, iy - 3); ctx.stroke(); }
+    else { ctx.beginPath(); ctx.moveTo(ix - 8, iy); ctx.lineTo(ix + 8, iy); ctx.moveTo(ix + 2, iy - 6); ctx.lineTo(ix + 8, iy); ctx.lineTo(ix + 2, iy + 6); ctx.stroke(); }
+    ctx.font = "bold 16px 'Segoe UI', sans-serif"; ctx.fillText(label, r.x + 44, iy + 1);
+    ctx.restore();
+  },
+  drawDraftBuildSummary(ctx) {
+    const x = 40, y = 632, w = CONFIG.WIDTH - 80, h = 136;
+    const keys = CONFIG.bonusOrder.filter(k => this.bonuses[k] > 0);
+    const active = CONFIG.chipOrder.filter(k => this.chips[k] > 0);
+    UI.panel(ctx, x, y, w, h, 12, { accent: "#4dabf7", top: "rgba(77,171,247,.09)", bottom: "rgba(255,255,255,.02)" });
+    ctx.save(); ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#fff"; ctx.font = "bold 16px 'Segoe UI', sans-serif"; ctx.fillText("当前构筑", x + 16, y + 23);
+    ctx.fillStyle = "#adb5bd"; ctx.font = "13px 'Segoe UI', sans-serif";
+    if (!keys.length && !active.length) ctx.fillText("暂无永久 BONUS", x + 16, y + 56);
+    let bx = x + 16, by = y + 56, shown = 0;
+    const drawBadge = (text, color) => {
+      const bw = Math.min(136, Math.max(70, ctx.measureText(text).width + 18));
+      if (bx + bw > x + w - 16) { bx = x + 16; by += 30; }
+      if (by > y + h - 22) return false;
+      ctx.fillStyle = "rgba(8,16,28,.72)"; UI.roundRect(ctx, bx, by - 12, bw, 24, 8); ctx.fill();
+      ctx.strokeStyle = UI.rgba(color, .7); ctx.lineWidth = 1.1; UI.roundRect(ctx, bx, by - 12, bw, 24, 8); ctx.stroke();
+      ctx.fillStyle = color; ctx.font = "bold 12px 'Segoe UI', sans-serif"; ctx.fillText(text, bx + 9, by + 1);
+      bx += bw + 8; shown++; return true;
+    };
+    for (const key of active) if (!drawBadge(CONFIG.chips[key].name + " " + Math.ceil(this.chips[key]) + "s", CONFIG.chips[key].color)) break;
+    for (const key of keys) if (!drawBadge(CONFIG.bonuses[key].name + "×" + this.bonuses[key], CONFIG.bonuses[key].color)) break;
+    if (shown < active.length + keys.length) { ctx.fillStyle = "#adb5bd"; ctx.font = "12px 'Segoe UI', sans-serif"; ctx.fillText("+" + (active.length + keys.length - shown), bx + 4, by + 1); }
+    ctx.restore();
+  },
+  drawChipSelect(ctx) {
+    const cx = CONFIG.WIDTH / 2;
+    ctx.fillStyle = "rgba(0,0,0,.72)"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#fff"; ctx.font = "bold 34px 'Segoe UI', sans-serif"; ctx.fillText("选择本局强化", cx, 166);
+    ctx.fillStyle = "#adb5bd"; ctx.font = "15px 'Segoe UI', sans-serif"; ctx.fillText("本次奖励", cx, 196);
+    for (let i = 0; i < 3; i++) {
+      const card = this.cardInfo(this._chipChoices[i] || "");
+      if (!card) continue;
+      const r = this.chipChoiceRect(i), stack = card.type === "bonus" ? this.bonusStacks(card.key) : 0;
+      const rarityColor = { "普通": "#adb5bd", "稀有": "#cc5de8", "史诗": "#ffd43b" }[card.rarity] || "#adb5bd";
+      UI.panel(ctx, r.x, r.y, r.w, r.h, 12, { accent: card.color, top: UI.rgba(card.color, .14), bottom: "rgba(255,255,255,.03)", lineWidth: card.rarity === "史诗" ? 2.4 : 1.5 });
+      this.drawChipCardIcon(ctx, card, r.x + 48, r.y + r.h / 2, 27);
+      this.drawRarityBadge(ctx, r.x + r.w - 18, r.y + 28, card.rarity, rarityColor);
+      ctx.textAlign = "left";
+      ctx.fillStyle = rarityColor; ctx.font = "bold 13px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + " · " + (card.type === "chip" ? "限时技能" : "永久 BONUS") + (stack ? " · 已选×" + stack : ""), r.x + 88, r.y + 25);
+      ctx.fillStyle = "#fff"; ctx.font = "bold 23px 'Segoe UI', sans-serif"; ctx.fillText(card.name, r.x + 88, r.y + 51);
+      ctx.fillStyle = "#ced4da"; ctx.font = "14px 'Segoe UI', sans-serif";
+      UI.wrapText(ctx, card.desc, r.w - 118, 2).forEach((line, j) => ctx.fillText(line, r.x + 88, r.y + 73 + j * 17));
+    }
+    this.drawChipActionButton(ctx, "reroll", this._chipRerolls > 0 ? "重抽" : "已重抽", "#4dabf7", this._chipRerolls <= 0);
+    this.drawChipActionButton(ctx, "skip", "跳过拿分", "#adb5bd", false);
+    this.drawDraftBuildSummary(ctx);
+    ctx.textAlign = "left";
   },
 
   // F:无尽结算界面
@@ -812,6 +1249,7 @@ const game = {
     const target = r.target || null, targetScore = target && target.score ? target.score : 0;
     const targetSplits = target ? Challenge.cleanSplits(target.splits) : [], ownSplits = Challenge.cleanSplits(r.splits);
     const signed = (n) => (n >= 0 ? "+" : "") + n;
+    const fitLine = (text, maxWidth = 326) => UI.wrapText(ctx, text, maxWidth, 1)[0] || text;
     let infoY = 418;
     ctx.fillStyle = "rgba(0,0,0,.78)"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
     ctx.textAlign = "center";
@@ -822,26 +1260,57 @@ const game = {
     if (target) {
       const ship = CONFIG.ships[target.ship] ? CONFIG.ships[target.ship].name : (target.ship || "未知机型");
       const route = Challenge.routeStatus ? Challenge.routeStatus(target) : null;
+      const rivalEvents = r.rival && Array.isArray(r.rival.events) ? r.rival.events : [];
+      const rivalEventText = rivalEvents.length ? rivalEvents.map(e => (e.label || e.type) + " " + e.t + "s").join(" / ") : "未触发";
+      const rivalText = r.rival ? ("干扰 " + r.rival.fired + "/" + r.rival.total + " · " + rivalEventText + " · " + r.rival.points + "点") : "";
+      let splitLead = 0, splitTrail = 0, splitMissing = 0;
       const splitText = targetSplits.map(s => {
         const own = ownSplits.find(o => o.t === s.t);
-        return s.t + "s " + (own ? signed(own.score - s.score) : "未到");
+        if (!own) { splitMissing++; return s.t + "s 未到"; }
+        const delta = own.score - s.score;
+        if (delta >= 0) splitLead++;
+        else splitTrail++;
+        return s.t + "s " + signed(delta);
       }).join(" / ");
-      const boxH = 50 + (splitText ? 20 : 0) + (route ? 20 : 0);
+      const splitSummary = targetSplits.length ? ("领先" + splitLead + " 落后" + splitTrail + (splitMissing ? " 未到" + splitMissing : "")) : "";
+      const boxH = 50 + (splitText ? 20 : 0) + (route ? 20 : 0) + (rivalText ? 20 : 0);
       ctx.fillStyle = "rgba(8,16,28,.72)"; UI.roundRect(ctx, cx - 178, infoY - 20, 356, boxH, 10); ctx.fill();
       ctx.strokeStyle = r.final >= targetScore ? "rgba(56,217,169,.72)" : "rgba(255,212,59,.72)"; ctx.lineWidth = 1.2; UI.roundRect(ctx, cx - 178, infoY - 20, 356, boxH, 10); ctx.stroke();
       ctx.fillStyle = r.final >= targetScore ? "#38d9a9" : "#ffd43b"; ctx.font = "bold 16px 'Segoe UI', sans-serif";
-      ctx.fillText("对手 " + targetScore + " · " + (target.time || 0) + "s" + " · 连击 " + (target.combo || 0), cx, infoY);
-      ctx.fillStyle = "#adb5bd"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText(ship + " · 最终差 " + signed(r.final - targetScore), cx, infoY + 20);
+      ctx.fillText("对手 " + targetScore + " · " + (target.time || 0) + "s · 连击 " + (target.combo || 0), cx, infoY);
+      ctx.fillStyle = "#adb5bd"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText(fitLine(ship + " · " + (r.final >= targetScore ? "已超越" : "未超越") + " · 最终差 " + signed(r.final - targetScore)), cx, infoY + 20);
       let lineY = infoY + 40;
-      if (splitText) { ctx.fillText("分段差 " + splitText, cx, lineY); lineY += 20; }
+      if (splitText) { ctx.fillText(fitLine("分段 " + splitSummary + " · " + splitText), cx, lineY); lineY += 20; }
       if (route) ctx.fillText("航线 " + route.code + (route.ok ? " · 已校验" : " · 规则可能变化"), cx, lineY);
+      if (route) lineY += 20;
+      if (rivalText) ctx.fillText(fitLine(rivalText), cx, lineY);
       infoY += boxH + 10;
     }
     if (r.best && r.best.score) { ctx.fillStyle = r.newBest ? "#38d9a9" : "#74c0fc"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("个人最佳 " + r.best.score + "  ·  " + (r.newBest ? "新纪录" : "差 " + Math.max(0, r.best.score - r.final)), cx, infoY); infoY += 24; }
+    const compactResult = !!target && infoY > 500;
+    const eventText = r.events && r.events.length ? r.events.slice(-3).join(" / ") : "无";
+    const chipKeys = Object.keys(r.chips || {}).filter(k => r.chips[k] > 0);
+    const chipText = chipKeys.length ? chipKeys.map(k => (CONFIG.chips[k] ? CONFIG.chips[k].name : k) + "×" + r.chips[k]).slice(0, 3).join(" / ") : "无";
+    const bonusKeys = Object.keys(r.bonuses || {}).filter(k => r.bonuses[k] > 0);
+    const bonusText = bonusKeys.length ? bonusKeys.map(k => (CONFIG.bonuses[k] ? CONFIG.bonuses[k].name : k) + "×" + r.bonuses[k]).slice(0, 3).join(" / ") : "无";
+    ctx.fillStyle = "#adb5bd"; ctx.font = "13px 'Segoe UI', sans-serif";
+    if (compactResult) { ctx.fillText(fitLine("威胁 Lv." + (r.maxThreat || 0) + " · 事件 " + eventText + " · 芯片 " + chipText + " · BONUS " + bonusText, 356), cx, infoY); infoY += 18; }
+    else {
+      ctx.fillText("最高威胁 Lv." + (r.maxThreat || 0) + " · 事件 " + eventText, cx, infoY); infoY += 18;
+      ctx.fillText("芯片 " + chipText, cx, infoY); infoY += 22;
+      ctx.fillText("BONUS " + bonusText, cx, infoY); infoY += 22;
+    }
+    const tele = r.telemetry || {};
+    ctx.fillText(fitLine("战况 击杀 " + (tele.kills || 0) + " · Boss " + (tele.bossKills || 0) + " · 受击 " + (tele.hits || 0) + "(格挡 " + (tele.blocked || 0) + ") · 承伤 " + Math.round(tele.damageTaken || 0) + " · 炸弹 " + (tele.bombs || 0) + " · 选择 " + (tele.picks || 0) + "/" + (tele.drafts || 0), 356), cx, infoY); infoY += 18;
+    const timeline = (r.timeline || []).map(m => m.t + "s " + m.score + "分/" + m.kills + "杀/HP" + m.hp + "%").join(" · ");
+    if (timeline && !compactResult) { ctx.fillText(fitLine("节点 " + timeline, 356), cx, infoY); infoY += 22; }
     const boardY = infoY > 418 ? infoY + 16 : 434;
-    ctx.fillStyle = "#adb5bd"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("── 无尽榜 ──", cx, boardY);
-    let hl = false;
-    top.forEach((e, i) => { const me = !hl && e.score === r.final; if (me) hl = true; ctx.fillStyle = me ? "#ffd43b" : "#dee2e6"; ctx.font = (me ? "bold " : "") + "17px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + ".   " + e.score + "   " + e.date + (me ? "  ◄" : ""), cx, boardY + 30 + i * 28); });
+    if (!compactResult) {
+      ctx.fillStyle = "#adb5bd"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("── 无尽榜 ──", cx, boardY);
+      let hl = false;
+      const rows = r.challengeCode && boardY > 520 ? 2 : top.length;
+      top.slice(0, rows).forEach((e, i) => { const me = !hl && e.score === r.final; if (me) hl = true; ctx.fillStyle = me ? "#ffd43b" : "#dee2e6"; ctx.font = (me ? "bold " : "") + "17px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + ".   " + e.score + "   " + e.date + (me ? "  ◄" : ""), cx, boardY + 30 + i * 28); });
+    }
     if (r.challengeCode) UI.button(ctx, this.endlessChallengeRect(), { label: "复制挑战码 RIVAL", color: "#ffd43b", active: true, font: 20, radius: 14 });
     ctx.fillStyle = "#4a90d9"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("点击空白返回首页", cx, 724);
     ctx.textAlign = "left";
@@ -1534,11 +2003,11 @@ const game = {
     ctx.restore();
   },
   drawSecondaryHUD(ctx) {
-    const p = this.player, s = CONFIG.secondary, oc = p.overcharge || 0;
+    const p = this.player, s = CONFIG.secondary, oc = p.overcharge || 0, allCd = this.shipWeaponValue("cooldownMult", 1);
     const items = [
-      { type: "homing", need: s.homingPower, timer: p._homingTimer, interval: Math.max(0.32, s.homingInterval - oc * 0.05), color: "#74c0fc" },
-      { type: "laser", need: s.laserPower, timer: p._laserTimer, interval: Math.max(0.55, s.laserInterval - oc * 0.06), color: "#cc5de8" },
-      { type: "missile", need: s.missilePower, timer: p._missileTimer, interval: Math.max(0.75, s.missileInterval - oc * 0.04), color: "#ff922b" },
+      { type: "homing", need: s.homingPower, timer: p._homingTimer, interval: Math.max(0.24, (s.homingInterval - oc * 0.05) * this.chipValue("homingSwarm", "intervalMult", 1) * this.shipWeaponValue("homingIntervalMult", 1) * allCd * this.weaponCooldownMult()), color: "#74c0fc" },
+      { type: "laser", need: s.laserPower, timer: p._laserTimer, interval: Math.max(0.55, (s.laserInterval - oc * 0.06) * this.shipWeaponValue("laserIntervalMult", 1) * allCd * this.weaponCooldownMult()), color: "#cc5de8" },
+      { type: "missile", need: s.missilePower, timer: p._missileTimer, interval: Math.max(0.45, (s.missileInterval - oc * 0.04) * this.chipValue("missileBarrage", "intervalMult", 1) * this.shipWeaponValue("missileIntervalMult", 1) * allCd * this.weaponCooldownMult() * Math.max(0.6, 1 - this.bonusValue("missileRack", "missileCooldownMult"))), color: "#ff922b" },
     ];
     const y = 160, r = 16, gap = 44;
     items.forEach((it, i) => {
@@ -1573,8 +2042,8 @@ const game = {
     ctx.restore();
   },
   drawChipHUD(ctx) {
-    const active = CONFIG.chipOrder.filter(k => this.chips[k] > 0);
-    if (!active.length) return;
+    const active = CONFIG.chipOrder.filter(k => this.chips[k] > 0), bonuses = CONFIG.bonusOrder.filter(k => this.bonuses[k] > 0);
+    if (!active.length && !bonuses.length) return;
     let x = 16, y = 202;
     ctx.save(); ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.font = "bold 12px 'Segoe UI', sans-serif";
     for (const key of active) {
@@ -1586,6 +2055,37 @@ const game = {
       x += w + 8;
       if (x > CONFIG.WIDTH - 120) { x = 16; y += 28; }
     }
+    for (const key of bonuses) {
+      const b = CONFIG.bonuses[key], text = b.name + "×" + this.bonuses[key];
+      const w = Math.max(72, ctx.measureText(text).width + 18);
+      ctx.fillStyle = "rgba(8, 16, 28, .68)"; UI.roundRect(ctx, x, y - 12, w, 24, 8); ctx.fill();
+      ctx.strokeStyle = UI.rgba(b.color, .75); ctx.lineWidth = 1.2; UI.roundRect(ctx, x, y - 12, w, 24, 8); ctx.stroke();
+      ctx.fillStyle = b.color; ctx.fillText(text, x + 9, y + 1);
+      x += w + 8;
+      if (x > CONFIG.WIDTH - 120) { x = 16; y += 28; }
+    }
+    ctx.restore();
+  },
+  drawEndlessEventHUD(ctx) {
+    const e = this.activeEndlessEvent();
+    if (!e) return;
+    const text = e.name + " " + Math.ceil(this._endlessEventTimer) + "s";
+    const x = CONFIG.WIDTH / 2, y = this.boss ? 122 : 88;
+    ctx.save();
+    ctx.font = "bold 13px 'Segoe UI', sans-serif";
+    const w = Math.min(CONFIG.WIDTH - 64, ctx.measureText(text).width + 22), h = 24;
+    ctx.fillStyle = "rgba(8, 16, 28, .74)"; UI.roundRect(ctx, x - w / 2, y - h + 4, w, h, 8); ctx.fill();
+    ctx.strokeStyle = UI.rgba(e.color || "#ffd43b", .82); ctx.lineWidth = 1.2; UI.roundRect(ctx, x - w / 2, y - h + 4, w, h, 8); ctx.stroke();
+    ctx.textAlign = "center"; ctx.fillStyle = e.color || "#ffd43b"; ctx.fillText(text, x, y - 4);
+    ctx.restore();
+  },
+  drawChargeIcon(ctx, x, y, r, color = "#2b1d00") {
+    const s = r * 0.5, pulse = 1 + Math.sin(this.titleT * 7) * 0.06;
+    ctx.save(); ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2.4; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.shadowColor = color; ctx.shadowBlur = 6;
+    ctx.beginPath(); ctx.moveTo(x, y - s * 1.05); ctx.lineTo(x - s * 0.42, y + s * 0.4); ctx.lineTo(x, y + s * 0.18); ctx.lineTo(x + s * 0.42, y + s * 0.4); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x - s * 0.78 * pulse, y - s * 0.2); ctx.lineTo(x + s * 0.78 * pulse, y - s * 0.2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y + s * 0.55, s * 0.28 * pulse, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
   },
   drawChallengeHUD(ctx) {
@@ -1612,6 +2112,7 @@ const game = {
     ctx.fillStyle = "#adb5bd"; ctx.font = "16px 'Segoe UI', sans-serif"; ctx.fillText(this.endless ? "无尽 " + Math.floor(this._endlessT) + "s" : "关卡 " + this.levelDef().id, 200, 28);
     this.drawThreatHUD(ctx);
     this.drawChallengeHUD(ctx);
+    this.drawEndlessEventHUD(ctx);
 
     // AA:HP 血条 —— 更大更醒目:渐变(绿→黄→红)+ 底槽玻璃质感 + 掉血残影 + 危险脉动发光 + 图标
     const hpW = 190, hpH = 18, hpX = CONFIG.WIDTH - hpW - 16, hpY = 14;
@@ -1708,6 +2209,13 @@ const game = {
         ctx.fillStyle = "#dee2e6"; ctx.font = "bold 17px 'Segoe UI', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(Math.ceil(this.player.specialCooldown) + "", sb.x, sb.y + 1); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
       }
     }
+    const cb = this.chargeBtn, cc = CONFIG.charge, chargeUnlocked = this.player.power >= cc.minPower, chargeReady = chargeUnlocked && this.player.chargeCooldown <= 0;
+    const chargeCooldown = cc.cooldown * this.chipValue("chargeCore", "cooldownMult", 1) * this.shipWeaponValue("chargeCooldownMult", 1) * Math.max(0.55, 1 - this.bonusValue("chargeAmp", "cooldownMult"));
+    const chargeRatio = this.player.charging ? clamp(this.player.charge / cc.max, 0, 1) : (chargeReady ? 1 : clamp(1 - this.player.chargeCooldown / chargeCooldown, 0, 1));
+    UI.roundButton(ctx, cb.x, cb.y, cb.r, chargeReady || this.player.charging ? "#ffd43b" : "#495057", { alpha: chargeUnlocked ? 0.86 : 0.32, stroke: this.player.charging ? "#fff3bf" : "rgba(255,255,255,.35)" });
+    this.drawChargeIcon(ctx, cb.x, cb.y, cb.r, chargeReady || this.player.charging ? "#2b1d00" : "#ced4da");
+    if (chargeUnlocked && chargeRatio < 0.999) UI.bar(ctx, cb.x - cb.r, cb.y + cb.r + 6, cb.r * 2, 5, chargeRatio, "#868e96", "#ffd43b", {});
+    if (!chargeUnlocked) this.drawCountBadge(ctx, cb.x + cb.r * 0.62, cb.y - cb.r * 0.62, cc.minPower, "#495057");
     // 刷分模式:结算按钮 + 提示
     if (this.farming) {
       const sb = this.settleBtn;
