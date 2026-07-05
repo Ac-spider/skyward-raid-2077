@@ -80,5 +80,8 @@ assert(CONFIG.bonuses.armorCaliber.hpPerDamage > 0, "armorCaliber hpPerDamage mu
 between(CONFIG.bonuses.armorCaliber.maxDamage, 2, 8, "armorCaliber maxDamage");
 between(CONFIG.bonuses.painConverter.energyPerHp, 0.5, 2, "painConverter energyPerHp");
 between(CONFIG.bonuses.painConverter.maxEnergy, 15, 60, "painConverter maxEnergy");
+between(CONFIG.bonuses.sideCannons.maxPairs, 1, 4, "sideCannons maxPairs");
+between(CONFIG.bonuses.laserSplitter.maxPairs, 1, 5, "laserSplitter maxPairs");
+between(CONFIG.bonuses.clusterWarheads.maxCount, CONFIG.bonuses.clusterWarheads.count, 8, "clusterWarheads maxCount");
 
 console.log(`balance check passed: ${CONFIG.endless.events.length} events, ${affixes.length} boss affixes, ${CONFIG.bonusOrder.length} bonuses`);

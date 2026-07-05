@@ -665,6 +665,17 @@ const game = {
   draftPreviewText(card) {
     return [this.draftStatPreviewText(card), this.routePreviewText(card)].filter(Boolean).join(" · ");
   },
+  bonusDraftLimit(key) {
+    const b = CONFIG.bonuses[key];
+    if (!b) return Infinity;
+    if (b.maxPairs) return b.maxPairs;
+    if (key === "clusterWarheads" && b.maxCount && b.count) return Math.max(1, b.maxCount - b.count + 1);
+    return Infinity;
+  },
+  canDraftCard(id) {
+    const card = this.cardInfo(id);
+    return card && (card.type !== "bonus" || this.bonusStacks(card.key) < this.bonusDraftLimit(card.key));
+  },
   draftProgressText(card) {
     if (!card) return "";
     if (card.type === "bonus") {
@@ -676,6 +687,7 @@ const game = {
   },
   draftCardWeight(id) {
     const card = this.cardInfo(id); if (!card) return 0;
+    if (!this.canDraftCard(id)) return 0;
     let w = card.weight || 100;
     const info = this.routePreviewInfo(card), top = this.buildRouteSummary().top;
     if (info && info.unlocked) w *= 1.65;
@@ -695,7 +707,7 @@ const game = {
   },
   drawChipChoices(exclude = []) {
     const skip = new Set(exclude);
-    const pool = CONFIG.chipOrder.map(k => "chip:" + k).concat(CONFIG.bonusOrder.map(k => "bonus:" + k)).filter(id => !skip.has(id));
+    const pool = CONFIG.chipOrder.map(k => "chip:" + k).concat(CONFIG.bonusOrder.map(k => "bonus:" + k)).filter(id => !skip.has(id) && this.canDraftCard(id));
     this._chipChoices = [];
     while (this._chipChoices.length < 3 && pool.length) {
       const total = pool.reduce((s, id) => s + this.draftCardWeight(id), 0);
