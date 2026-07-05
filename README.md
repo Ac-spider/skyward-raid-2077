@@ -24,6 +24,7 @@
 - `src/levels.js`: 关卡波次和导演器
 - `src/game.js`: 游戏状态、碰撞、HUD、界面绘制
 - `src/main.js`: 初始化和主循环
+- `ASSET_PROMPTS.md`: 背景、战机、敌机、Boss 等美术素材生成提示词
 
 ## 当前方向
 
