@@ -248,9 +248,16 @@ const CONFIG = {
       { key: "overloadField", name: "过载磁场", color: "#ffd43b", sub: "分数提升,威胁提升", routeBias: "风险", scoreBonus: 0.25, threatGainMult: 1.3 },
       { key: "ambush", name: "伏击航道", color: "#74c0fc", sub: "敌群加密,补给偏防御", routeBias: "生存", spawnBonus: 2, powerupChanceAdd: 0.08, forceDrop: "heal" },
     ],
-    boss: { firstDelay: 30, interval: 35, hpStep: 0.08, hpStepMax: 12 },
+    boss: {
+      firstDelay: 30, interval: 35, hpStep: 0.08, hpStepMax: 12,
+      affixes: [
+        { key: "armored", name: "装甲", color: "#74c0fc", hpMult: 0.18, scoreMult: 1.12 },
+        { key: "rapid", name: "急袭", color: "#ff8787", fireMult: 0.82, scoreMult: 1.15 },
+        { key: "prism", name: "棱镜", color: "#cc5de8", attack: "laser", every: 5.5, warn: 0.55, dur: 0.65, width: 42, damageMult: 0.85, scoreMult: 1.16 },
+      ],
+    },
   },
-  challenge: { rulesVersion: 4, splits: [30, 60, 120] },
+  challenge: { rulesVersion: 5, splits: [30, 60, 120] },
 
   combo: { timeout: 2.5, scoreStep: 0.15, maxMult: 5, resetOnHit: false },
 

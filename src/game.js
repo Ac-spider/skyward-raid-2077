@@ -25,6 +25,7 @@ const game = {
   _mapHighlightId: null, _mapHighlightT: 0,   // MM:从图鉴跳转过来时高亮提示的关卡
   _levelTransX: 0, _levelTransY: 0, _levelTransT: 0,   // NN:进入关卡的聚焦扩散过渡(从点击处展开)
   autoNext: true, endless: false, challengeSeed: "", challengeMode: false, challengeDaily: false, challengeTarget: null, challengeSplits: [], rivalInterference: null, _rng: null, _endlessT: 0, _endlessSpawnT: 0, _endlessBossT: 0, _endlessBossN: 0, _endlessEventT: 0, _endlessEventTimer: 0, _endlessEvent: null, _endlessEventsSeen: [], _endlessStats: null, _endlessTimeline: [], _endlessMarkIdx: 0,
+  _endlessBossAffixesSeen: [],
   _shake: 0, _shakeT: 0, _hitStopT: 0,   // N:打击感
   // 触控按钮放大,便于拇指操作
   bombBtn: { x: 58, y: CONFIG.HEIGHT - 70, r: 42 },
@@ -165,7 +166,7 @@ const game = {
     this.resetDepthSystems();
     this.flashTimer = 0; this.warningTimer = 0; this._hpTrailRatio = 1;
     this._endlessT = 0; this._endlessSpawnT = CONFIG.endless.spawn.initialDelay; this._endlessBossT = CONFIG.endless.boss.firstDelay; this._endlessBossN = 0;
-    this._endlessEvent = null; this._endlessEventTimer = 0; this._endlessEventT = CONFIG.endless.eventInterval * 0.65; this._endlessEventsSeen = [];
+    this._endlessEvent = null; this._endlessEventTimer = 0; this._endlessEventT = CONFIG.endless.eventInterval * 0.65; this._endlessEventsSeen = []; this._endlessBossAffixesSeen = [];
     this.resetEndlessTelemetry();
     director.begin(null);
     input.targetX = CONFIG.player.startX; input.targetY = CONFIG.player.startY;
@@ -270,7 +271,7 @@ const game = {
     const previousBest = ChallengeHistory.best(this.challengeSeed, this.ship.key);
     const challengeCode = Challenge.encode({ seed: this.challengeSeed, ship: this.ship.key, score: final, time, combo: this.maxCombo, splits, rulesVersion: CONFIG.challenge.rulesVersion });
     const best = ChallengeHistory.submit({ seed: this.challengeSeed, ship: this.ship.key, score: final, time, combo: this.maxCombo, splits, code: challengeCode, daily: this.challengeDaily });
-    this.endlessResult = { base: this.score, diffFactor: this.activeDiff.scoreMult, time, final, maxCombo: this.maxCombo, splits, challengeCode, challengeSeed: this.challengeSeed, challengeMode: this.challengeMode, challengeDaily: this.challengeDaily, target: this.challengeTarget, rival: (typeof RivalInterference !== "undefined") ? RivalInterference.summary(this.rivalInterference) : null, events: this._endlessEventsSeen.slice(), chips: Object.assign({}, this._chipStats), bonuses: Object.assign({}, this._bonusStats), telemetry: Object.assign({}, this._endlessStats || {}), timeline: this._endlessTimeline.slice(), maxThreat: this._maxThreatLevel, best, newBest: !previousBest || final > previousBest.score };
+    this.endlessResult = { base: this.score, diffFactor: this.activeDiff.scoreMult, time, final, maxCombo: this.maxCombo, splits, challengeCode, challengeSeed: this.challengeSeed, challengeMode: this.challengeMode, challengeDaily: this.challengeDaily, target: this.challengeTarget, rival: (typeof RivalInterference !== "undefined") ? RivalInterference.summary(this.rivalInterference) : null, events: this._endlessEventsSeen.slice(), bossAffixes: this._endlessBossAffixesSeen.slice(), chips: Object.assign({}, this._chipStats), bonuses: Object.assign({}, this._bonusStats), telemetry: Object.assign({}, this._endlessStats || {}), timeline: this._endlessTimeline.slice(), maxThreat: this._maxThreatLevel, best, newBest: !previousBest || final > previousBest.score };
     this.endlessTop = EndlessBoard.submit(final);
     this.state = "endlessover";
     Achievements.checkEndlessEnd({ time: this._endlessT, maxCombo: this.maxCombo });   // OO
@@ -792,11 +793,32 @@ const game = {
     if (this.endless) {
       const cfg = CONFIG.endless.boss, mult = 1 + Math.min(this._endlessBossN, cfg.hpStepMax) * cfg.hpStep;
       b.maxHp = Math.round(b.maxHp * mult); b.hp = b.maxHp;
+      this.applyEndlessBossAffix(b, this.pick(cfg.affixes || []));
     }
-    this.enemies.push(b); this.boss = b; this.warningTimer = 2.2; this.showDialogue(b.def.name, b.def.taunt, 3.8); return b;
+    this.enemies.push(b); this.boss = b; this.warningTimer = 2.2; this.showDialogue(this.bossDisplayName(b), b.def.taunt, 3.8); return b;
+  },
+  bossDisplayName(b) { return b && b.affix ? b.affix.name + "·" + b.def.name : b.def.name; },
+  applyEndlessBossAffix(b, affix) {
+    if (!b || !affix) return;
+    b.affix = affix; b._affixTimer = affix.every || 0;
+    if (affix.hpMult) { b.maxHp = Math.round(b.maxHp * (1 + affix.hpMult)); b.hp = b.maxHp; }
+    if (affix.fireMult) b._fireScale *= affix.fireMult;
+    if (affix.scoreMult) b.score = Math.round(b.score * affix.scoreMult);
+    this._endlessBossAffixesSeen.push(affix.name + "·" + b.def.name);
+    this.floats.push(new FloatText(b.x, b.def.enterY - b.radius - 18, "Boss词缀 " + affix.name, affix.color));
+  },
+  updateBossAffix(b, dt) {
+    const a = b && b.affix;
+    if (!a || !a.attack) return;
+    b._affixTimer -= dt;
+    if (b._affixTimer > 0) return;
+    b._affixTimer = a.every || 5;
+    if (a.attack === "laser") this.spawnBossLaser(this.player ? this.player.x : b.x, a.warn || 0.55, a.dur || 0.65, a.width || 42, b.bulletDamage * (a.damageMult || 1));
+    this.spawnShockwave(b.x, b.y, b.radius * 1.8, a.color);
+    Sound.tone(620, 0.08, "triangle", 0.1, 180);
   },
   // Y:BOSS 狂暴触发提示(HP<=20% 时一次性)
-  onBossEnrage(b) { this.showDialogue(b.def.name, "狂暴!攻击频率大幅提升!", 3.0); this.addShake(6, 0.28); Sound.hit(); Haptics.bomb(); },
+  onBossEnrage(b) { this.showDialogue(this.bossDisplayName(b), "狂暴!攻击频率大幅提升!", 3.0); this.addShake(6, 0.28); Sound.hit(); Haptics.bomb(); },
   onBossPhaseChange(b, phaseIndex) {
     if (phaseIndex <= 0) return;
     const color = b.def.colors[phaseIndex] || "#ffd43b", kind = this.canDrop("chip") ? "chip" : "power";
@@ -807,7 +829,7 @@ const game = {
     this.powerups.push(new PowerUp(clamp(b.x, 40, CONFIG.WIDTH - 40), b.y + b.radius, kind));
     this.spawnShockwave(b.x, b.y, b.radius * 3, color);
     this.floats.push(new FloatText(b.x, b.y - b.radius - 16, "阶段 " + (phaseIndex + 1) + " 窗口", color));
-    this.showDialogue(b.def.name, "装甲破裂!短暂补给窗口!", 2.2);
+    this.showDialogue(this.bossDisplayName(b), "装甲破裂!短暂补给窗口!", 2.2);
     this.addShake(5, 0.22); Sound.powerup();
   },
   // Y:镭射攻击 —— warn 秒预警(半透明红条)后进入 dur 秒的伤害柱,期间站在范围内会持续受伤(复用玩家受击无敌帧天然限制伤害频率)
@@ -1408,12 +1430,14 @@ const game = {
     const chipText = chipKeys.length ? chipKeys.map(k => (CONFIG.chips[k] ? CONFIG.chips[k].name : k) + "×" + r.chips[k]).slice(0, 3).join(" / ") : "无";
     const bonusKeys = Object.keys(r.bonuses || {}).filter(k => r.bonuses[k] > 0);
     const bonusText = bonusKeys.length ? bonusKeys.map(k => (CONFIG.bonuses[k] ? CONFIG.bonuses[k].name : k) + "×" + r.bonuses[k]).slice(0, 3).join(" / ") : "无";
+    const bossAffixText = r.bossAffixes && r.bossAffixes.length ? r.bossAffixes.slice(-3).join(" / ") : "无";
     const routeText = this.buildRouteText(r.bonuses || {}, 2);
     const routeEffect = this.routeEffectText(r.bonuses || {}, 2);
     ctx.fillStyle = "#adb5bd"; ctx.font = "13px 'Segoe UI', sans-serif";
-    if (compactResult) { ctx.fillText(fitLine("威胁 Lv." + (r.maxThreat || 0) + " · 路线 " + routeText + (routeEffect ? " · 共鸣 " + routeEffect : "") + " · 事件 " + eventText + " · BONUS " + bonusText, 356), cx, infoY); infoY += 18; }
+    if (compactResult) { ctx.fillText(fitLine("威胁 Lv." + (r.maxThreat || 0) + " · 路线 " + routeText + (routeEffect ? " · 共鸣 " + routeEffect : "") + " · Boss词缀 " + bossAffixText + " · BONUS " + bonusText, 356), cx, infoY); infoY += 18; }
     else {
       ctx.fillText(fitLine("最高威胁 Lv." + (r.maxThreat || 0) + " · 路线 " + routeText + (routeEffect ? " · 共鸣 " + routeEffect : "") + " · 事件 " + eventText, 356), cx, infoY); infoY += 18;
+      ctx.fillText(fitLine("Boss词缀 " + bossAffixText, 356), cx, infoY); infoY += 18;
       ctx.fillText("芯片 " + chipText, cx, infoY); infoY += 22;
       ctx.fillText("BONUS " + bonusText, cx, infoY); infoY += 22;
     }

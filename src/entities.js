@@ -600,6 +600,7 @@ class Boss {
     if (phaseIndex !== this._lastPhaseIndex) { this._lastPhaseIndex = phaseIndex; game.onBossPhaseChange(this, phaseIndex); }
     // Y:血量 <=20% 时触发一次狂暴,此后攻击频率永久提升
     if (!this._enraged && this.hp / this.maxHp <= 0.2) { this._enraged = true; this._fireScale *= 0.7; game.onBossEnrage(this); }
+    if (this.affix) game.updateBossAffix(this, dt);
     const phase = def.phases[phaseIndex];
     this._fireTimer -= dt;
     if (this._fireTimer <= 0) { this._fireTimer = phase.cd * this._fireScale; for (const atk of phase.attacks) runBossAttack(this, atk); }
@@ -609,6 +610,7 @@ class Boss {
     const flash = this._flash > 0, color = flash ? "#fff" : this.def.colors[this.phaseIndex], r = this.radius, x = this.x, y = this.y;
     // Y:狂暴态外圈红色脉动光晕
     if (this._enraged) { const gr = r + 14 + Math.sin(this._t * 6) * 4; ctx.fillStyle = "rgba(255,40,40,.22)"; ctx.beginPath(); ctx.arc(x, y, gr, 0, Math.PI * 2); ctx.fill(); }
+    if (this.affix && !flash) { ctx.strokeStyle = UI.rgba(this.affix.color, .72); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 20 + Math.sin(this._t * 5) * 3, 0, Math.PI * 2); ctx.stroke(); }
     if (!flash && ImageAssets.draw(ctx, ImageAssets.boss(this.defIndex), x, y, r * 2.45)) return;
     // 侧翼炮塔
     ctx.fillStyle = "#2b3038"; ctx.fillRect(x - r - 7, y - 8, 12, 26); ctx.fillRect(x + r - 5, y - 8, 12, 26);
