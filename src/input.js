@@ -5,6 +5,7 @@
  * ===================================================================== */
 const input = {
   dragging: false, targetX: CONFIG.player.startX, targetY: CONFIG.player.startY,
+  dragPointerX: 0, dragPointerY: 0, dragTargetX: CONFIG.player.startX, dragTargetY: CONFIG.player.startY,
   // KK:虚拟摇杆状态。joyDX/joyDY 是 -1..1 的方向×强度(死区内为0),joyKnobX/Y 是摇杆头当前绘制位置。
   joystickActive: false, joyDX: 0, joyDY: 0, joyKnobX: CONFIG.joystick.baseX, joyKnobY: CONFIG.joystick.baseY,
   // YY:movePointerId 记录"正在负责移动飞机"的那根手指的 pointerId。移动端常见操作是一根手指按住拖动飞机、
@@ -24,6 +25,16 @@ function updateJoystick(px, py) {
 function resetJoystick() {
   input.joystickActive = false; input.joyDX = 0; input.joyDY = 0;
   input.joyKnobX = CONFIG.joystick.baseX; input.joyKnobY = CONFIG.joystick.baseY;
+}
+function startRelativeDrag(px, py) {
+  const p = game.player || input;
+  input.dragging = true; input.dragPointerX = px; input.dragPointerY = py;
+  input.dragTargetX = p.x ?? input.targetX; input.dragTargetY = p.y ?? input.targetY;
+  input.targetX = input.dragTargetX; input.targetY = input.dragTargetY;
+}
+function updateRelativeDrag(px, py) {
+  input.targetX = input.dragTargetX + px - input.dragPointerX;
+  input.targetY = input.dragTargetY + py - input.dragPointerY;
 }
 function toggleMute() {
   const on = !(Settings.data.sound || Settings.data.music);
@@ -51,11 +62,11 @@ canvas.addEventListener("pointerdown", (e) => {
   if (game.specialButtonHit(p.x, p.y)) { game.useSpecial(); return; }                                // 必杀按钮
   if (game.pauseButtonHit(p.x, p.y)) { game.pause(); return; }                                       // 暂停按钮
   if (game.bombButtonHit(p.x, p.y)) { game.useBomb(); return; }
-  // KK:操作方式二选一 —— 虚拟摇杆(定速推杆)或拖动跟随(默认,飞机跟手指位置)
+  // KK:操作方式二选一 —— 虚拟摇杆(定速推杆)或相对拖动(默认,按手指位移移动飞机)
   // YY:记下这根手指的 pointerId,后续 move/up 只认这一根,不会被另一根点按钮的手指干扰
   input.movePointerId = e.pointerId;
   if (Settings.data.controlMode === "joystick") { input.joystickActive = true; updateJoystick(p.x, p.y); }
-  else { input.dragging = true; input.targetX = p.x; input.targetY = p.y; }
+  else startRelativeDrag(p.x, p.y);
   canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener("pointermove", (e) => {
@@ -66,7 +77,7 @@ canvas.addEventListener("pointermove", (e) => {
   // YY:忽略非移动手指发来的坐标——否则点技能/炸弹/暂停按钮的那根手指稍微一动就会把飞机的移动目标改成按钮位置
   if (e.pointerId !== input.movePointerId) return;
   if (input.joystickActive) { updateJoystick(p.x, p.y); return; }
-  if (!input.dragging) return; input.targetX = p.x; input.targetY = p.y;
+  if (!input.dragging) return; updateRelativeDrag(p.x, p.y);
 });
 canvas.addEventListener("pointerup", (e) => {
   if (e.pointerId === input.movePointerId) { input.dragging = false; resetJoystick(); input.movePointerId = null; }   // YY:只有移动手指抬起才停止跟随

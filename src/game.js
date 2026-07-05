@@ -1204,7 +1204,7 @@ const game = {
     toggle(R.music, "音乐", Settings.data.music);
     toggle(R.haptics, "震动", Settings.data.haptics);
     toggle(R.hidewings, "隐藏僚机", Settings.data.hideWings);   // 开=隐藏
-    // KK:操作方式(拖动跟随/虚拟摇杆二选一,不是简单开关,复用 UI.button 但自定义文案/配色)
+    // KK:操作方式(相对拖动/虚拟摇杆二选一,不是简单开关,复用 UI.button 但自定义文案/配色)
     { const isJoy = Settings.data.controlMode === "joystick", r = R.controlMode;
       ctx.textAlign = "left"; ctx.fillStyle = "#adb5bd"; ctx.font = "19px 'Segoe UI', sans-serif"; ctx.fillText("操作方式", cx - 200, r.y + r.h / 2 + 6);
       UI.button(ctx, r, { label: isJoy ? "虚拟摇杆" : "相对拖动", color: isJoy ? "#ff922b" : "#4dabf7", active: true, font: 16, radius: 11 }); }
