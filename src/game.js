@@ -463,7 +463,8 @@ const game = {
           row.append(meta, button("复制", "#495057", () => copyText(code)), button("重打", "#343a40", () => startCode(code)));
           history.appendChild(row);
         });
-      }
+      };
+      renderHistory();
     }
     setTimeout(() => { input.focus(); if (opts.readonly) input.select(); }, 0);
   },
@@ -742,6 +743,9 @@ const game = {
   draftShieldText(card) {
     return this.isShieldCounterCard(card) ? "破盾对策" : "";
   },
+  draftHpText(card) {
+    return this.isHpDraftCard(card) ? "血量/回复" : "";
+  },
   draftCardRoute(card) {
     return !card ? "" : card.type === "chip" ? this.chipRouteName(card.key) : ((this.routePreviewInfo(card) || {}).top || {}).name || "";
   },
@@ -789,7 +793,7 @@ const game = {
     return "";
   },
   isHpDraftCard(id) {
-    const card = this.cardInfo(id), b = card && card.type === "bonus" ? CONFIG.bonuses[card.key] : null;
+    const card = typeof id === "string" ? this.cardInfo(id) : id, b = card && card.type === "bonus" ? CONFIG.bonuses[card.key] : null;
     return !!(b && (b.hp || b.hpPct || b.heal || b.healPct));
   },
   isBossCounterCard(card) {
@@ -877,7 +881,15 @@ const game = {
   },
   chipRewardWait() {
     if (!this.endless) return 0;
-    return Math.max(0, Math.max(CONFIG.powerup.chipMinEndlessTime || 0, this._nextChipDraftAt || 0) - this._endlessT);
+    const last = Number.isFinite(this._lastChipDraftAt) ? this._lastChipDraftAt : -Infinity;
+    return Math.max(0, Math.max(CONFIG.powerup.chipMinEndlessTime || 0, this._nextChipDraftAt || 0, last + this.chipMinDraftGap()) - this._endlessT);
+  },
+  chipMinDraftGap() {
+    return CONFIG.powerup.chipMinDraftGap || CONFIG.powerup.chipBossDraftDelay || 15;
+  },
+  draftCadenceText() {
+    const min = this.chipMinDraftGap(), max = CONFIG.powerup.chipDraftInterval || 30;
+    return min < max ? min + "-" + max + "秒/次" : max + "秒/次";
   },
   updateChipDraftTimer() {
     if (!this.endless || this.state !== "playing" || !this.canClaimChipReward()) return false;
@@ -897,7 +909,7 @@ const game = {
   },
   scheduleBossDraftReward(src) {
     if (!this.endless || this.state !== "playing") return false;
-    const delay = CONFIG.powerup.chipBossDraftDelay || 15;
+    const delay = Math.max(CONFIG.powerup.chipBossDraftDelay || 0, this.chipMinDraftGap());
     const earliest = (Number.isFinite(this._lastChipDraftAt) ? this._lastChipDraftAt : this._endlessT) + delay;
     const rewardAt = Math.max(this._endlessT, earliest);
     const currentAt = Math.max(CONFIG.powerup.chipMinEndlessTime || 0, this._nextChipDraftAt || 0);
@@ -1776,7 +1788,7 @@ const game = {
     ctx.fillStyle = "rgba(0,0,0,.72)"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
     ctx.textAlign = "center";
     ctx.fillStyle = "#fff"; ctx.font = "bold 34px 'Segoe UI', sans-serif"; ctx.fillText("选择本局强化", cx, 166);
-    ctx.fillStyle = "#adb5bd"; ctx.font = "15px 'Segoe UI', sans-serif"; ctx.fillText(this._chipDraftReason || ("本次奖励 · 每" + (CONFIG.powerup.chipDraftInterval || 30) + "秒一次"), cx, 196);
+    ctx.fillStyle = "#adb5bd"; ctx.font = "15px 'Segoe UI', sans-serif"; ctx.fillText(this._chipDraftReason || ("本次奖励 · " + this.draftCadenceText()), cx, 196);
     for (let i = 0; i < 3; i++) {
       const card = this.cardInfo(this._chipChoices[i] || "");
       if (!card) continue;
@@ -1786,7 +1798,7 @@ const game = {
       this.drawChipCardIcon(ctx, card, r.x + 48, r.y + r.h / 2, 27);
       this.drawRarityBadge(ctx, r.x + r.w - 18, r.y + 28, card.rarity, rarityColor);
       ctx.textAlign = "left";
-      const tags = [this.draftEventBiasText(card), this.draftFocusText(card), this.draftBossText(card), this.draftShieldText(card)].filter(Boolean).join(" · ");
+      const tags = [this.draftHpText(card), this.draftEventBiasText(card), this.draftFocusText(card), this.draftBossText(card), this.draftShieldText(card)].filter(Boolean).join(" · ");
       ctx.fillStyle = rarityColor; ctx.font = "bold 13px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + " · " + (card.type === "chip" ? "限时技能" : "永久 BONUS") + " · " + this.draftProgressText(card) + (tags ? " · " + tags : ""), r.x + 88, r.y + 25);
       ctx.fillStyle = "#fff"; ctx.font = "bold 23px 'Segoe UI', sans-serif"; ctx.fillText(card.name, r.x + 88, r.y + 51);
       ctx.fillStyle = "#ced4da"; ctx.font = "14px 'Segoe UI', sans-serif";
@@ -2698,7 +2710,7 @@ const game = {
   drawDraftCooldownHUD(ctx) {
     if (!this.endless) return;
     const wait = this.chipRewardWait(), ready = wait <= 0;
-    const cadence = (CONFIG.powerup.chipDraftInterval || 30) + "秒/次";
+    const cadence = this.draftCadenceText();
     const text = (ready ? "强化就绪" : "强化 " + Math.ceil(wait) + "s") + " · " + cadence;
     ctx.save();
     ctx.font = "bold 12px 'Segoe UI', sans-serif";

@@ -29,6 +29,7 @@ assert(CONFIG && CONFIG.player && CONFIG.endless, "CONFIG did not load");
 between(CONFIG.powerup.chipMinEndlessTime, 15, 30, "first endless draft delay");
 between(CONFIG.powerup.chipDraftInterval, 15, 30, "endless draft interval");
 between(CONFIG.powerup.chipBossDraftDelay, 15, 30, "boss draft delay");
+between(CONFIG.powerup.chipMinDraftGap, 15, 30, "minimum endless draft gap");
 between(CONFIG.endless.maxEnemies, 8, 20, "endless max enemies");
 between(CONFIG.endless.enemyHpRampMult, 1.5, 3.2, "endless enemy HP ramp");
 between(CONFIG.endless.dmgRampMult, 1.5, 3.5, "endless damage ramp");
@@ -146,6 +147,7 @@ game.drawChipChoices();
 assert(game._chipChoices.some(id => id.startsWith("bonus:")), "endless draft should include one permanent bonus option");
 assert(hasSurvivalDraft(), "endless draft should include one survival/HP option");
 assert(hasHpDraft(), "endless draft should include one HP/sustain option");
+assert(game.draftHpText(game.cardInfo("bonus:maxHp")).includes("血量"), "HP draft cards should show readable HP tag");
 game.bonuses = { missileRack: 1 }; game._chipChoices = []; game._rng = () => 0.999;
 game.drawChipChoices();
 assert(hasDraftRoute("导弹"), "draft should include an option for the current focused route");
@@ -186,6 +188,10 @@ assert.strictEqual(game._endlessStats.bossDrafts, 1, "boss reward should be trac
 game.state = "playing"; game._endlessT = 100; game._lastChipDraftAt = 96; game._nextChipDraftAt = 108; game._pendingBossDraft = false; game._endlessStats = {};
 assert.strictEqual(game.scheduleBossDraftReward({ x: 100, y: 100, radius: 40 }), false, "boss reward should not make drafts too frequent");
 assert.strictEqual(game._nextChipDraftAt, 108, "nearby scheduled draft should be kept");
+game.state = "playing"; game._endlessT = 100; game._lastChipDraftAt = 96; game._nextChipDraftAt = 100; game._pendingBossDraft = false; game._endlessStats = { drafts: 0 };
+assert.strictEqual(game.updateChipDraftTimer(), false, "draft timer should enforce the minimum draft gap");
+game._endlessT = 96 + CONFIG.powerup.chipMinDraftGap;
+assert.strictEqual(game.updateChipDraftTimer(), true, "draft timer should open after the minimum draft gap");
 for (const e of CONFIG.endless.events.filter(e => e.routeBias)) {
   const matching = draftIds.filter(id => game.draftCardRoute(game.cardInfo(id)) === e.routeBias);
   assert(matching.length, `event ${e.key} routeBias ${e.routeBias} has no matching draft cards`);
