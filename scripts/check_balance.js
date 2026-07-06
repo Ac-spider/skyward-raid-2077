@@ -217,6 +217,14 @@ assert(game.draftCardWeight("bonus:shieldBreaker") > shieldBreakerBaseWeight, "s
 game.drawChipChoices();
 assert(game._chipChoices.includes("bonus:shieldBreaker"), "shield pressure draft should include shieldBreaker");
 assert(game.draftShieldText(game.cardInfo("bonus:shieldBreaker")).includes("破盾"), "shield pressure cards should show counter text");
+game._endlessEvent = null; game._endlessEventTimer = 0; game.enemies = []; game.bonuses = {}; game.chips = {}; game._chipChoices = []; game._rng = () => 0.999;
+const eliteHunterBaseWeight = game.draftCardWeight("bonus:eliteHunter");
+game._endlessEvent = aceHunt; game._endlessEventTimer = 10;
+assert(game.hasElitePressure(), "ace hunt should count as elite pressure");
+assert(game.draftCardWeight("bonus:eliteHunter") > eliteHunterBaseWeight, "elite pressure should weight eliteHunter higher");
+game.drawChipChoices();
+assert(game._chipChoices.includes("bonus:eliteHunter"), "elite pressure draft should include eliteHunter");
+assert(game.draftEliteText(game.cardInfo("bonus:eliteHunter")).includes("精英"), "elite pressure cards should show counter text");
 game.state = "playing"; game._endlessT = CONFIG.powerup.chipMinEndlessTime - 0.01; game._lastChipDraftAt = -Infinity; game._nextChipDraftAt = 0; game._endlessStats = { drafts: 0 };
 assert.strictEqual(game.updateChipDraftTimer(), false, "draft timer should wait until the fixed delay");
 game._endlessT = CONFIG.powerup.chipMinEndlessTime;
@@ -322,6 +330,7 @@ for (const key of CONFIG.bonusOrder) assert(bonusKeys.has(key), `bonusOrder refe
 for (const key of ["maxHp", "reinforcedHull", "armorPlating", "fieldRepair", "repairLoop", "repairPulse", "leech", "livingArmor", "painConverter", "armorCaliber", "vitalReactor", "stableFire", "shieldAmplifier", "shieldBreaker", "signalFilter"]) {
   assert(bonusKeys.has(key), `missing survival/build bonus ${key}`);
 }
+assert(bonusKeys.has("eliteHunter"), "missing elite counter build bonus");
 assert(CONFIG.bonuses.armorCaliber.hpPerDamage > 0, "armorCaliber hpPerDamage must be positive");
 between(CONFIG.bonuses.armorCaliber.maxDamage, 2, 8, "armorCaliber maxDamage");
 assert(CONFIG.bonuses.vitalReactor.hpPerDamageMult > 0, "vitalReactor hpPerDamageMult must be positive");
@@ -334,6 +343,7 @@ between(CONFIG.bonuses.shieldBreaker.shieldDamageMult, 0.25, 1.0, "shieldBreaker
 between(CONFIG.bonuses.shieldBreaker.breakDamage, 3, 14, "shieldBreaker breakDamage");
 between(CONFIG.bonuses.shieldBreaker.range, 100, 220, "shieldBreaker range");
 between(CONFIG.bonuses.signalFilter.jamResist, 0.08, 0.3, "signalFilter jamResist");
+between(CONFIG.bonuses.eliteHunter.eliteDamageMult, 0.15, 0.6, "eliteHunter eliteDamageMult");
 between(CONFIG.bonuses.repairLoop.every, 8, 22, "repairLoop interval");
 between(CONFIG.bonuses.repairLoop.healPct, 0.03, 0.12, "repairLoop healPct");
 between(CONFIG.bonuses.repairLoop.shield, 4, 16, "repairLoop shield");
@@ -378,6 +388,11 @@ game.bonuses = { shieldAmplifier: 1 }; game.chips = {}; game.player = { hp: 100,
 assert.strictEqual(game.playerDamage(100), 100, "shieldAmplifier should not add damage without shield");
 game.player.shieldHp = 10;
 assert(game.playerDamage(100) > 100, "shieldAmplifier should add damage while shielded");
+game.bonuses = { eliteHunter: 1 }; game.chips = {}; game.player = { hp: 100, maxHp: 100, baseMaxHp: 100, shieldHp: 0 };
+assert.strictEqual(game.playerDamage(100, { hp: 100, maxHp: 100 }), 100, "eliteHunter should not add damage to normal enemies");
+assert(game.playerDamage(100, { elite: "shield", hp: 100, maxHp: 100 }) > 100, "eliteHunter should add damage to elite enemies");
+assert(game.draftStatPreviewText(game.cardInfo("bonus:eliteHunter")).includes("%"), "eliteHunter draft preview should show damage");
+assert(game.bonusHUDText("eliteHunter").includes("%"), "eliteHunter HUD should show elite damage");
 game.bonuses = { stableFire: 1 }; game.chips = {}; game.player = { hp: 100, maxHp: 100, baseMaxHp: 100, shieldHp: 0 };
 assert(game.playerDamage(100) > 100, "stableFire should add damage while HP is high");
 assert(game.draftStatPreviewText(game.cardInfo("bonus:stableFire")).includes("%"), "stableFire draft preview should show damage");

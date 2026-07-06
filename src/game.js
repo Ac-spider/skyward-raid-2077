@@ -564,6 +564,7 @@ const game = {
   },
   playerDamage(d, target = null) {
     let m = 1 + this.bonusValue("damage", "damageMult") + this.bonusValue("glassCannon", "damageMult") + this.vitalReactorDamageMult() + this.stableFireDamageMult() + this.shieldDamageMult() + this.adrenalineValue("damageMult");
+    if (target && target.elite) m += this.bonusValue("eliteHunter", "eliteDamageMult");
     if (target && target.isBoss) m += this.bonusValue("bossHunter", "bossDamageMult");
     if (target && target.isBoss && target._weakTimer > 0) m += (target._weakDamageMult || (target.affix && target.affix.weakDamageMult) || CONFIG.bossPhase.weakDamageMult || 0) + this.bonusValue("weakScanner", "weakDamageMult");
     if (target && target.maxHp && target.hp / target.maxHp <= (CONFIG.bonuses.executioner.threshold || 0)) m += this.bonusValue("executioner", "damageMult");
@@ -614,12 +615,12 @@ const game = {
   },
   buildRouteSummary(source = this.bonuses) {
     const routes = [
-      { name: "主炮", color: "#ffd43b", weights: { damage: 1, fireRate: 1, pierce: 2, kineticAmmo: 2, heavyRounds: 3, armorPiercer: 3, armorCaliber: 2, vitalReactor: 1, stableFire: 1, sideCannons: 3, chainSpark: 1, pointDefense: 1, shieldAmplifier: 1, shieldBreaker: 2, executioner: 1, glassCannon: 1, weakScanner: 1, overdrive: 1 } },
+      { name: "主炮", color: "#ffd43b", weights: { damage: 1, fireRate: 1, pierce: 2, kineticAmmo: 2, heavyRounds: 3, armorPiercer: 3, armorCaliber: 2, vitalReactor: 1, stableFire: 1, sideCannons: 3, chainSpark: 1, pointDefense: 1, shieldAmplifier: 1, shieldBreaker: 2, executioner: 1, eliteHunter: 2, glassCannon: 1, weakScanner: 1, overdrive: 1 } },
       { name: "激光", color: "#cc5de8", weights: { damage: 1, range: 1, laserLens: 3, laserSplitter: 3, chargeAmp: 1, bossHunter: 1, weakScanner: 2, glassCannon: 1 } },
       { name: "追踪", color: "#4dabf7", weights: { range: 1, fireRate: 1, swarmCore: 3, homingShards: 3, signalFilter: 2, magnetCore: 1, comboBattery: 1, comboBarrage: 3, comboSurge: 1 } },
       { name: "导弹", color: "#ff922b", weights: { missileRack: 3, explosivePayload: 3, clusterWarheads: 3, missileInterceptor: 2, fireRate: 1, range: 1, bossHunter: 1, weakScanner: 2 } },
       { name: "生存", color: "#38d9a9", weights: { maxHp: 2, reinforcedHull: 3, armorPlating: 3, fieldRepair: 3, repairLoop: 3, repairPulse: 2, leech: 2, livingArmor: 3, painConverter: 1, salvage: 2, shieldAmplifier: 3, shieldBreaker: 1, armorCaliber: 2, vitalReactor: 3, stableFire: 3, reactiveArmor: 2, lastStand: 3, emergencyBarrier: 3, magnetCore: 1, pointDefense: 2, missileInterceptor: 1, signalFilter: 1 } },
-      { name: "风险", color: "#ff6b6b", weights: { glassCannon: 3, overdrive: 3, adrenaline: 3, painConverter: 2, comboBarrage: 1, comboSurge: 2, executioner: 1, bossHunter: 1, weakScanner: 1 } },
+      { name: "风险", color: "#ff6b6b", weights: { glassCannon: 3, overdrive: 3, adrenaline: 3, painConverter: 2, comboBarrage: 1, comboSurge: 2, executioner: 1, eliteHunter: 1, bossHunter: 1, weakScanner: 1 } },
     ].map(r => {
       const score = Object.keys(r.weights).reduce((sum, key) => sum + (source[key] || 0) * r.weights[key], 0);
       const stage = score >= 7 ? "成型" : score >= 3 ? "偏向" : "起步";
@@ -728,6 +729,7 @@ const game = {
     if (key === "shieldBreaker") return "破盾伤害 +" + pct(this.bonusValue(key, "shieldDamageMult")) + "→+" + pct(this.withDraftBonus(key, () => this.bonusValue(key, "shieldDamageMult")));
     if (key === "signalFilter") return "干扰抗性 +" + pct(this.bonusValue(key, "jamResist")) + "→+" + pct(this.withDraftBonus(key, () => this.bonusValue(key, "jamResist")));
     if (key === "weakScanner") return "弱点 +" + pct(this.bonusValue(key, "weakDamageMult")) + " / +" + num(this.bonusValue(key, "weakDuration")) + "s→+" + pct(this.withDraftBonus(key, () => this.bonusValue(key, "weakDamageMult"))) + " / +" + num(this.withDraftBonus(key, () => this.bonusValue(key, "weakDuration"))) + "s";
+    if (key === "eliteHunter") return "精英伤害 +" + pct(this.bonusValue(key, "eliteDamageMult")) + "→+" + pct(this.withDraftBonus(key, () => this.bonusValue(key, "eliteDamageMult")));
     if (["damage", "glassCannon", "bossHunter"].includes(key)) return "伤害倍率 " + pct(this.playerDamage(1, { isBoss: key === "bossHunter", hp: 1, maxHp: 1 })) + "→" + pct(this.withDraftBonus(key, () => this.playerDamage(1, { isBoss: key === "bossHunter", hp: 1, maxHp: 1 })));
     if (["fireRate", "overdrive"].includes(key)) return "武器冷却 " + pct(this.weaponCooldownMult()) + "→" + pct(this.withDraftBonus(key, () => this.weaponCooldownMult()));
     if (["armorPlating"].includes(key)) return "承伤 " + pct(this.damageTakenMult()) + "→" + pct(this.withDraftBonus(key, () => this.damageTakenMult()));
@@ -755,6 +757,9 @@ const game = {
   },
   draftBossText(card) {
     return this.isBossCounterCard(card) ? "Boss对策" : "";
+  },
+  draftEliteText(card) {
+    return this.isEliteCounterCard(card) ? "精英对策" : "";
   },
   draftShieldText(card) {
     return this.isShieldCounterCard(card) ? "破盾对策" : "";
@@ -799,6 +804,7 @@ const game = {
     if (eventBias && this.draftCardRoute(card) === eventBias) w *= 1.55;
     if (this.isSurvivalCounterCard(card)) w *= 1.7;
     if (this.isBossCounterCard(card)) w *= 1.45;
+    if (this.isEliteCounterCard(card)) w *= 1.65;
     if (this.isShieldCounterCard(card)) w *= 1.75;
     return w;
   },
@@ -818,6 +824,13 @@ const game = {
   },
   isBossCounterCard(card) {
     return !!(this.boss && !this.boss.dead && card && card.type === "bonus" && ["bossHunter", "weakScanner", "executioner", "damage", "glassCannon", "vitalReactor"].includes(card.key));
+  },
+  hasElitePressure() {
+    const e = this.activeEndlessEvent();
+    return !!((e && (e.eliteGoal || e.eliteChance >= 0.35)) || this.enemies.some(x => !x.dead && x.elite));
+  },
+  isEliteCounterCard(card) {
+    return !!(this.hasElitePressure() && card && card.type === "bonus" && card.key === "eliteHunter");
   },
   hasShieldPressure() {
     const e = this.activeEndlessEvent(), a = this.boss && !this.boss.dead ? this.boss.affix : null;
@@ -848,6 +861,8 @@ const game = {
     const hasBonusRoute = route => this._chipChoices.some(id => id.startsWith("bonus:") && this.draftCardRoute(this.cardInfo(id)) === route);
     const bias = this.activeEventRouteBias(), biased = bias ? pool.filter(id => this.draftCardRoute(this.cardInfo(id)) === bias) : [];
     if (biased.length) takeWeighted(biased);
+    const elitePool = this.hasElitePressure() ? pool.filter(id => id === "bonus:eliteHunter") : [];
+    if (this._chipChoices.length < 3 && elitePool.length && !this._chipChoices.includes("bonus:eliteHunter")) takeWeighted(elitePool);
     const bonusPool = pool.filter(id => id.startsWith("bonus:"));
     if (!this._chipChoices.some(id => id.startsWith("bonus:")) && bonusPool.length) takeWeighted(bonusPool);
     const hpPool = pool.filter(id => this.isHpDraftCard(id));
@@ -1827,7 +1842,7 @@ const game = {
       this.drawChipCardIcon(ctx, card, r.x + 48, r.y + r.h / 2, 27);
       this.drawRarityBadge(ctx, r.x + r.w - 18, r.y + 28, card.rarity, rarityColor);
       ctx.textAlign = "left";
-      const tags = [this.draftSurvivalText(card), this.draftHpText(card), this.draftEventBiasText(card), this.draftFocusText(card), this.draftBossText(card), this.draftShieldText(card)].filter(Boolean).join(" · ");
+      const tags = [this.draftSurvivalText(card), this.draftHpText(card), this.draftEventBiasText(card), this.draftFocusText(card), this.draftBossText(card), this.draftEliteText(card), this.draftShieldText(card)].filter(Boolean).join(" · ");
       ctx.fillStyle = rarityColor; ctx.font = "bold 13px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + " · " + (card.type === "chip" ? "限时技能" : "永久 BONUS") + " · " + this.draftProgressText(card) + (tags ? " · " + tags : ""), r.x + 88, r.y + 25);
       ctx.fillStyle = "#fff"; ctx.font = "bold 23px 'Segoe UI', sans-serif"; ctx.fillText(card.name, r.x + 88, r.y + 51);
       ctx.fillStyle = "#ced4da"; ctx.font = "14px 'Segoe UI', sans-serif";
@@ -2708,6 +2723,7 @@ const game = {
     if (key === "stableFire" && n > 0) return b.name + " +" + Math.round(this.bonusValue(key, "damageMult") * 100) + "%" + (this.stableFireDamageMult() > 0 ? " 激活" : " 待机");
     if (key === "shieldAmplifier" && n > 0) return b.name + " +" + Math.round(this.bonusValue(key, "damageMult") * 100) + "%" + (this.player && this.player.shieldHp > 0 ? " 激活" : "");
     if (key === "shieldBreaker" && n > 0) return b.name + " +" + Math.round(this.bonusValue(key, "shieldDamageMult") * 100) + "%";
+    if (key === "eliteHunter" && n > 0) return b.name + " +" + Math.round(this.bonusValue(key, "eliteDamageMult") * 100) + "%";
     if (key === "signalFilter" && n > 0) return b.name + " +" + Math.round(this.bonusValue(key, "jamResist") * 100) + "%";
     if (key === "weakScanner" && n > 0) return b.name + " +" + Math.round(this.bonusValue(key, "weakDamageMult") * 100) + "% +" + (Math.round(this.bonusValue(key, "weakDuration") * 10) / 10) + "s";
     return b.name + "×" + n;
