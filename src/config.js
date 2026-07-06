@@ -95,7 +95,7 @@ const CONFIG = {
     sideGuns: { name: "侧翼炮组", desc: "主炮附加斜向火力", color: "#ffd43b", duration: 10, angle: 22 },
     volatileCore: { name: "危险过载", desc: "分数更高,承伤也更高", color: "#ff6b6b", duration: 9, scoreBonus: 0.35, threatGainMult: 1.35, damageTakenMult: 1.18 },
   },
-  bonusOrder: ["damage", "fireRate", "range", "maxHp", "reinforcedHull", "armorPlating", "fieldRepair", "repairLoop", "repairPulse", "leech", "livingArmor", "painConverter", "missileRack", "pierce", "chainSpark", "pointDefense", "salvage", "shieldAmplifier", "kineticAmmo", "heavyRounds", "armorPiercer", "armorCaliber", "vitalReactor", "sideCannons", "laserLens", "laserSplitter", "swarmCore", "homingShards", "signalFilter", "explosivePayload", "clusterWarheads", "missileInterceptor", "magnetCore", "comboBattery", "comboSurge", "chargeAmp", "executioner", "reactiveArmor", "lastStand", "glassCannon", "bossHunter", "weakScanner", "adrenaline", "emergencyBarrier", "overdrive"],
+  bonusOrder: ["damage", "fireRate", "range", "maxHp", "reinforcedHull", "armorPlating", "fieldRepair", "repairLoop", "repairPulse", "leech", "livingArmor", "painConverter", "missileRack", "pierce", "chainSpark", "pointDefense", "salvage", "shieldAmplifier", "kineticAmmo", "heavyRounds", "armorPiercer", "armorCaliber", "vitalReactor", "sideCannons", "laserLens", "laserSplitter", "swarmCore", "homingShards", "signalFilter", "explosivePayload", "clusterWarheads", "missileInterceptor", "magnetCore", "comboBattery", "comboBarrage", "comboSurge", "chargeAmp", "executioner", "reactiveArmor", "lastStand", "glassCannon", "bossHunter", "weakScanner", "adrenaline", "emergencyBarrier", "overdrive"],
   bonuses: {
     damage: { name: "火力校准", desc: "全武器伤害 +15%", color: "#ff6b6b", damageMult: 0.15 },
     fireRate: { name: "加速扳机", desc: "主炮/副武器射速 +10%", color: "#4dabf7", cooldownMult: 0.10 },
@@ -131,6 +131,7 @@ const CONFIG = {
     missileInterceptor: { name: "拦截爆破", desc: "导弹爆炸会清除爆点附近敌弹", color: "#ff922b", rarity: "稀有", weight: 32, rangeMult: 0.95 },
     magnetCore: { name: "回收磁场", desc: "补给吸附范围 +70%", color: "#20c997", magnetMult: 0.70 },
     comboBattery: { name: "连击电池", desc: "每 10 连击获得能量和护盾", color: "#ffd43b", rarity: "稀有", weight: 36, energy: 16, shield: 8, dur: 4 },
+    comboBarrage: { name: "连击弹幕", desc: "每 10 连击释放追踪弹幕", color: "#4dabf7", rarity: "稀有", weight: 34, count: 2, maxCount: 8 },
     comboSurge: { name: "连击涡轮", desc: "每 10 连击获得 1 层过载", color: "#ffd43b", rarity: "史诗", weight: 18, overcharge: 1 },
     chargeAmp: { name: "蓄能放大器", desc: "蓄力激光更强,冷却更短", color: "#f783ac", rarity: "稀有", weight: 34, boostBonus: 4, cooldownMult: 0.14 },
     executioner: { name: "处决算法", desc: "对 40% 血以下敌人伤害 +30%", color: "#e64980", rarity: "稀有", weight: 34, threshold: 0.4, damageMult: 0.30 },
@@ -292,7 +293,7 @@ const CONFIG = {
       ],
     },
   },
-  challenge: { rulesVersion: 53, splits: [30, 60, 120] },
+  challenge: { rulesVersion: 54, splits: [30, 60, 120] },
 
   combo: { timeout: 2.5, scoreStep: 0.15, maxMult: 5, resetOnHit: false },
 

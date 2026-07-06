@@ -13,7 +13,10 @@ const { CONFIG } = sandbox;
 const { game } = sandbox;
 sandbox.FloatText = class FloatText { constructor(x, y, text, color) { this.x = x; this.y = y; this.text = text; this.color = color; } };
 sandbox.Shockwave = class Shockwave { constructor(x, y, maxR, color) { this.x = x; this.y = y; this.maxR = maxR; this.color = color; } };
-sandbox.pools = { enemy: { get(type, x, y, move, elite) { return { type, x, y, move, elite, dead: false, isBoss: false, radius: CONFIG.enemy[type].radius }; } } };
+sandbox.pools = {
+  enemy: { get(type, x, y, move, elite) { return { type, x, y, move, elite, dead: false, isBoss: false, radius: CONFIG.enemy[type].radius }; } },
+  homingShot: { get(x, y, overcharge) { return { x, y, overcharge }; } },
+};
 sandbox.Sound = { powerup() {}, tone() {} };
 
 const between = (value, min, max, label) => assert(value >= min && value <= max, `${label} ${value} outside ${min}-${max}`);
@@ -245,9 +248,15 @@ game.player.shieldHp = 10;
 assert(game.playerDamage(100) > 100, "shieldAmplifier should add damage while shielded");
 between(CONFIG.bonuses.painConverter.energyPerHp, 0.5, 2, "painConverter energyPerHp");
 between(CONFIG.bonuses.painConverter.maxEnergy, 15, 60, "painConverter maxEnergy");
+between(CONFIG.bonuses.comboBarrage.count, 1, 4, "comboBarrage count");
+between(CONFIG.bonuses.comboBarrage.maxCount, 4, 12, "comboBarrage maxCount");
 between(CONFIG.bonuses.sideCannons.maxPairs, 1, 4, "sideCannons maxPairs");
 between(CONFIG.bonuses.laserSplitter.maxPairs, 1, 5, "laserSplitter maxPairs");
 between(CONFIG.bonuses.clusterWarheads.maxCount, CONFIG.bonuses.clusterWarheads.count, 8, "clusterWarheads maxCount");
+game.bonuses = { comboBarrage: 1 }; game.homingShots = []; game.floats = []; game.player = { x: 100, y: 100, radius: 15, overcharge: 0 };
+game.comboMilestone(10);
+assert.strictEqual(game.homingShots.length, CONFIG.bonuses.comboBarrage.count, "comboBarrage should fire homing shots on combo milestone");
+assert(game.draftStatPreviewText(game.cardInfo("bonus:comboBarrage")).includes("2"), "comboBarrage draft preview should show shot count");
 game.bonuses = {}; assert.strictEqual(game.missileVolleyBonus(), 0, "missile route should not add volley before ready");
 game.bonuses = { missileRack: 3 }; assert.strictEqual(game.missileVolleyBonus(), 1, "missile route should add one missile when ready");
 assert(game.routeEffectText().includes("导弹+1"), "missile route resonance text should show the extra missile");
