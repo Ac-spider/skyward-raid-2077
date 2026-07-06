@@ -658,7 +658,19 @@ class Enemy {
   // QQ:主体色改渐变(受光面亮/边缘暗)+ 整体加柔和投影,取代纯色平涂,读起来更有质感
   draw(ctx) {
     const x = this.x, y = this.y, r = this.radius, t = this.type;
-    if (this._flash <= 0 && ImageAssets.draw(ctx, ImageAssets.enemy(t), x, y, r * 2.8)) {
+    if (ImageAssets.draw(ctx, ImageAssets.enemy(t), x, y, r * 2.8)) {
+      if (this._flash > 0) {
+        const hit = clamp(this._flash / 0.06, 0, 1);
+        ctx.save();
+        ctx.strokeStyle = UI.rgba("#ffd43b", 0.22 + hit * 0.5);
+        ctx.lineWidth = 1.5 + hit * 2.5;
+        ctx.shadowColor = "#ffd43b";
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(x, y, r * (1.25 + (1 - hit) * 0.18), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
       this.drawCarrierSpawnRing(ctx);
       this.drawRoleAura(ctx);
       this.drawEliteMark(ctx);
