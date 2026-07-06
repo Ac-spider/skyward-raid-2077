@@ -15,36 +15,73 @@ sandbox.FloatText = class FloatText { constructor(x, y, text, color) { this.x = 
 sandbox.Shockwave = class Shockwave { constructor(x, y, maxR, color) { this.x = x; this.y = y; this.maxR = maxR; this.color = color; } };
 sandbox.pools = {
   enemy: { get(type, x, y, move, elite) { const cfg = CONFIG.enemy[type], r = cfg.radius; return { type, x, y: cfg.fromBottom ? CONFIG.HEIGHT + r + y : y, move: cfg.move || move, elite, dead: false, isBoss: false, radius: r, cfg }; } },
-  enemyBullet: { get(x, y, vx, vy, damage) { return { x, y, vx, vy, damage, dead: false }; } },
+  enemyBullet: { get(x, y, vx, vy, damage, opts) { return { x, y, vx, vy, damage, dead: false, kind: opts && opts.kind || "", radius: opts && opts.radius || CONFIG.enemyBullet.radius }; } },
   homingShot: { get(x, y, overcharge) { return { x, y, overcharge }; } },
 };
 sandbox.Sound = { powerup() {}, tone() {} };
-vm.runInContext(fs.readFileSync("src/entities.js", "utf8") + "\nglobalThis.Enemy = Enemy; globalThis.Missile = Missile; globalThis.PlayerLaser = PlayerLaser;", sandbox);
-const { Enemy, Missile, PlayerLaser } = sandbox;
+vm.runInContext(fs.readFileSync("src/entities.js", "utf8") + "\nglobalThis.Enemy = Enemy; globalThis.EnemyBullet = EnemyBullet; globalThis.Missile = Missile; globalThis.PlayerLaser = PlayerLaser; globalThis.Boss = Boss;", sandbox);
+const { Enemy, EnemyBullet, Missile, PlayerLaser, Boss } = sandbox;
 
 const between = (value, min, max, label) => assert(value >= min && value <= max, `${label} ${value} outside ${min}-${max}`);
 const unique = (items, label) => assert.strictEqual(new Set(items).size, items.length, `${label} has duplicate keys`);
 
 assert(CONFIG && CONFIG.player && CONFIG.endless, "CONFIG did not load");
+assert.strictEqual(CONFIG.challenge.rulesVersion, 80, "challenge rules should bump for enemy durability and boss locks");
 
 between(CONFIG.powerup.chipMinEndlessTime, 15, 30, "first endless draft delay");
 between(CONFIG.powerup.chipDraftInterval, 15, 30, "endless draft interval");
 between(CONFIG.powerup.chipBossDraftDelay, 15, 30, "boss draft delay");
 between(CONFIG.powerup.chipMinDraftGap, 15, 30, "minimum endless draft gap");
+assert.strictEqual(CONFIG.powerup.chipMinEndlessTime, 30, "first timed endless draft should wait 30s");
+assert.strictEqual(CONFIG.powerup.chipDraftInterval, 30, "endless draft interval should be 30s");
+assert.strictEqual(CONFIG.powerup.chipBossDraftDelay, 30, "boss draft delay should be 30s");
+assert.strictEqual(CONFIG.powerup.chipMinDraftGap, 30, "minimum endless draft gap should be 30s");
+assert.strictEqual(CONFIG.powerup.dropChance, 0.11, "normal powerup drops should be toned down");
 between(CONFIG.endless.maxEnemies, 8, 20, "endless max enemies");
 between(CONFIG.endless.startingDrafts, 1, 3, "endless starting drafts");
+assert.strictEqual(CONFIG.endless.startingDrafts, 2, "endless challenge should start with 2 drafts");
+assert.strictEqual(CONFIG.endless.powerupChance, 0.09, "endless powerup chance should be toned down");
 between(CONFIG.endless.enemyHpBaseMult, 1.1, 2.0, "endless enemy base HP");
+assert.strictEqual(CONFIG.endless.enemyHpBaseMult, 1.55, "endless enemy base HP should match the harder baseline");
+assert.strictEqual(CONFIG.endless.enemyHpRampTime, 240, "endless enemy HP should hit the target ramp at 240s");
+assert.strictEqual(CONFIG.endless.enemyHpLateTime, 80, "endless enemies should get tougher after 80s");
+assert.strictEqual(CONFIG.endless.enemyHpLateMult, 2.5, "endless enemies should be at least 2.5x HP after 80s");
 between(CONFIG.endless.enemyHpRampMult, 1.5, 3.2, "endless enemy HP ramp");
 between(CONFIG.endless.dmgRampMult, 1.5, 3.5, "endless damage ramp");
 between(CONFIG.endless.boss.firstDelay, 20, 45, "first boss delay");
 between(CONFIG.endless.boss.interval, 25, 55, "boss interval");
 between(CONFIG.endless.boss.baseHpMult, 1, 1.8, "boss base HP mult");
+assert.strictEqual(CONFIG.endless.boss.baseHpMult, 1.35, "endless boss base HP should match the harder baseline");
 between(CONFIG.endless.boss.hpStep, 0.04, 0.16, "boss HP step");
+assert.strictEqual(CONFIG.endless.boss.hpStep, 0.11, "endless boss HP step should stay uncapped and steeper");
 between(CONFIG.bossPhase.weakDuration, 1.5, 4, "boss phase weak duration");
 between(CONFIG.bossPhase.weakDamageMult, 0.1, 0.45, "boss phase weak damage");
+between(CONFIG.bossInvuln.minCount, 2, 3, "boss invuln min count");
+between(CONFIG.bossInvuln.maxCount, 2, 3, "boss invuln max count");
+between(CONFIG.bossInvuln.minDuration, 5, 10, "boss invuln min duration");
+between(CONFIG.bossInvuln.maxDuration, 5, 10, "boss invuln max duration");
 between(CONFIG.endless.eventClearScore, 300, 1800, "event clear score");
+assert.strictEqual(CONFIG.endless.eventClearScore, 700, "event clear score should be toned down");
 between(CONFIG.endless.eventCleanShield, 8, 50, "event clean shield");
+assert.strictEqual(CONFIG.endless.eventCleanShield, 18, "clean event shield should be toned down");
 between(CONFIG.endless.eventCleanShieldDur, 2, 10, "event clean shield duration");
+assert.strictEqual(CONFIG.chips.laserFocus.laserDamageBonus, 1, "laserFocus chip should be toned down");
+assert.strictEqual(CONFIG.chips.missileBarrage.damageBonus, 1, "missileBarrage chip should be toned down");
+assert.strictEqual(CONFIG.chips.chargeCore.boostBonus, 2, "chargeCore chip should be toned down");
+assert.strictEqual(CONFIG.bonuses.damage.damageMult, 0.12, "damage bonus should be toned down");
+assert.strictEqual(CONFIG.bonuses.fireRate.cooldownMult, 0.08, "fireRate bonus should be toned down");
+assert.strictEqual(CONFIG.bonuses.perfectLine.damageMult, 0.10, "perfectLine damage should be toned down");
+assert.strictEqual(CONFIG.bonuses.bossHunter.bossDamageMult, 0.30, "bossHunter bonus should be toned down");
+const pickBuffCards = ["chip:chargeCore", "chip:capacitor", "bonus:maxHp", "bonus:livingArmor", "bonus:medicalReservoir", "bonus:repairLoop", "bonus:missileInterceptor", "bonus:comboBattery", "bonus:emergencyBarrier"];
+for (const id of pickBuffCards) {
+  const card = game.cardInfo(id), buff = card && card.pickBuff;
+  assert(buff && buff.label, `${id} should show a pick buff label`);
+  if (buff.energy) between(buff.energy, 1, 12, `${id} pick energy`);
+  if (buff.shield) between(buff.shield, 1, 14, `${id} pick shield`);
+  if (buff.healPct) between(buff.healPct, 0.01, 0.08, `${id} pick heal pct`);
+  if (buff.clearBullets) between(buff.clearBullets, 100, 180, `${id} pick clear range`);
+}
+assert(game.draftPickBuffText(game.cardInfo("bonus:missileInterceptor")).includes("附带"), "pick buff should be visible in draft preview");
 
 const enemyKeys = new Set(Object.keys(CONFIG.enemy));
 const shieldCarrier = CONFIG.enemy.shieldCarrier;
@@ -59,8 +96,21 @@ assert.strictEqual(kamikaze.fromBottom, true, "kamikaze should enter from behind
 assert(kamikaze.crashDamage > CONFIG.crashDamage, "kamikaze should hit harder than normal collisions");
 assert(CONFIG.moves.rearChase, "rear chase movement should exist");
 assert.strictEqual(CONFIG.moves.rearChase.warn, 2, "rear chase should warn for 2 seconds");
-assert.strictEqual(CONFIG.moves.rearChase.boost, 2, "rear chase should boost for 2 seconds");
+assert.strictEqual(CONFIG.moves.rearChase.boost, 2.5, "rear chase should boost for 2.5 seconds");
+assert.strictEqual(CONFIG.moves.rearChase.track, 2.5, "rear chase should keep tracking during the 2.5s boost");
+assert(Math.abs(CONFIG.enemy.kamikaze.speed * CONFIG.moves.rearChase.boostMul - CONFIG.enemy.small.speed) < 1e-9, "rear chase boost should match the fastest small plane speed");
 assert(CONFIG.moves.rearChase.boostMul > CONFIG.moves.rearChase.speedMul, "rear chase boost should be faster than normal chase");
+const beacon = CONFIG.enemy.beacon, gunner = CONFIG.enemy.gunner, mineLayer = CONFIG.enemy.mineLayer, tether = CONFIG.enemy.tether;
+assert(beacon && gunner && mineLayer && tether, "enemy special types should exist");
+between(beacon.homingInterval, 2.8, 5, "beacon homing cadence");
+between(gunner.homingInterval, 3.4, 5.5, "gunner homing cadence");
+between(beacon.homingTurn, 2, 4, "beacon homing turn");
+assert.strictEqual(mineLayer.zoneKind, "fire", "mineLayer should add fire zones in endless");
+between(mineLayer.zoneRadius, 32, 70, "fire zone radius");
+between(mineLayer.zoneDamage, 2, 7, "fire zone damage");
+assert.strictEqual(tether.zoneKind, "ice", "tether should add ice zones in endless");
+between(tether.zoneRadius, 36, 72, "ice zone radius");
+between(tether.slowMult, 0.35, 0.75, "ice slow multiplier");
 const eliteTypes = CONFIG.elite.types || [];
 unique(eliteTypes, "elite types");
 assert(eliteTypes.length >= 5, "elite type variety should include at least 5 types");
@@ -85,8 +135,22 @@ assert(game.jamFactor(100, 100) < jammedWithoutFilter, "signalFilter should redu
 game.bonuses = {};
 game.endless = true; game._endlessT = 0; game._endlessEvent = null; game._endlessEventTimer = 0;
 assert(game.endlessEnemyHpMult() >= CONFIG.endless.enemyHpBaseMult, "endless enemies should start with the base HP multiplier");
+game._endlessT = CONFIG.endless.enemyHpLateTime;
+assert(Math.abs(game.endlessEnemyHpMult() - CONFIG.endless.enemyHpLateMult) < 1e-9, "endless enemies should lock to 2.5x HP after 80s");
 game._endlessT = CONFIG.endless.enemyHpRampTime;
 assert(game.endlessEnemyHpMult() >= CONFIG.endless.enemyHpBaseMult * CONFIG.endless.enemyHpRampMult, "endless enemies should reach the configured HP ramp");
+assert(Math.abs(game.endlessEnemyHpMult() - 3) < 1e-9, "endless enemies should reach 3x HP at 240s");
+const hpAtRamp = game.endlessEnemyHpMult();
+game._endlessT = CONFIG.endless.enemyHpRampTime * 2;
+assert(game.endlessEnemyHpMult() > hpAtRamp, "endless enemy HP should keep growing after the old ramp point");
+between(CONFIG.endless.spawn.countStepMax, 3, 10, "endless spawn count cap");
+const cappedSpawnCount = CONFIG.endless.spawn.countBase + CONFIG.endless.spawn.countStepMax;
+assert.strictEqual(game.endlessSpawnCount(9999), cappedSpawnCount, "endless spawn count should cap for readability and performance");
+assert(!("hpStepMax" in CONFIG.endless.boss), "endless boss HP should not have a growth cap");
+game._endlessT = CONFIG.endless.dmgDoubleInterval || 300;
+const bulletAt5m = game.endlessBulletDmgMult();
+game._endlessT = (CONFIG.endless.dmgDoubleInterval || 300) * 2;
+assert(game.endlessBulletDmgMult() > bulletAt5m, "endless bullet damage should keep growing without a cap");
 game.endless = false;
 for (const [i, pool] of CONFIG.endless.pools.entries()) {
   assert(pool.enemies && pool.enemies.length, `endless pool ${i} is empty`);
@@ -107,6 +171,9 @@ assert(eventKeys.includes("shieldedAmbush"), "endless events should include shie
 assert(eventKeys.includes("sniperCrossfire"), "endless events should include mixed sniper/crossfire pressure");
 assert(eventKeys.includes("blackoutRaid"), "endless events should include jammer elite pressure");
 assert(eventKeys.includes("rearAssault"), "endless events should include rear kamikaze pressure");
+assert(eventKeys.includes("hornetPursuit"), "endless events should include homing missile pressure");
+assert(eventKeys.includes("scorchedLane"), "endless events should include fire zone pressure");
+assert(eventKeys.includes("frostNet"), "endless events should include ice slow pressure");
 const routeNames = new Set(["主炮", "激光", "追踪", "导弹", "生存", "风险"]);
 const drops = new Set(["power", "heal", "bomb", "wing", "chip"]);
 for (const e of CONFIG.endless.events) {
@@ -120,7 +187,7 @@ for (const e of CONFIG.endless.events) {
   if (e.killGoal != null) between(e.killGoal, 6, 30, `event ${e.key} killGoal`);
   if (e.eliteGoal != null) between(e.eliteGoal, 2, 10, `event ${e.key} eliteGoal`);
   if (e.noHitGoal != null) assert.strictEqual(e.noHitGoal, true, `event ${e.key} noHitGoal should be true when present`);
-  if (e.scoreBonus != null) between(e.scoreBonus, 0, 0.35, `event ${e.key} scoreBonus`);
+  if (e.scoreBonus != null) between(e.scoreBonus, 0, 0.18, `event ${e.key} scoreBonus`);
   if (e.threatGainMult != null) between(e.threatGainMult, 1, 1.5, `event ${e.key} threatGainMult`);
   if (e.forceDrop) assert(drops.has(e.forceDrop), `event ${e.key} has invalid forceDrop ${e.forceDrop}`);
   if (e.powerupChanceAdd != null) between(CONFIG.endless.powerupChance + e.powerupChanceAdd, 0, 0.4, `event ${e.key} total powerup chance`);
@@ -168,6 +235,15 @@ const rearAssault = CONFIG.endless.events.find(e => e.key === "rearAssault");
 assert.strictEqual(rearAssault.enemyType, "kamikaze", "rear assault should force kamikaze enemies");
 assert(rearAssault.minTime >= 90, "rear assault should be a mid endless event");
 assert.strictEqual(rearAssault.routeBias, "生存", "rear assault should bias survival drafts");
+const hornetPursuit = CONFIG.endless.events.find(e => e.key === "hornetPursuit");
+assert.strictEqual(hornetPursuit.enemyType, "beacon", "homing swarm should force beacon enemies");
+assert(hornetPursuit.minTime >= beacon.homingMinTime, "homing swarm should start after homing is enabled");
+const scorchedLane = CONFIG.endless.events.find(e => e.key === "scorchedLane");
+assert.strictEqual(scorchedLane.enemyType, "mineLayer", "scorched lane should force mine layers");
+assert(scorchedLane.minTime >= mineLayer.zoneMinTime, "scorched lane should start after fire zones are enabled");
+const frostNet = CONFIG.endless.events.find(e => e.key === "frostNet");
+assert.strictEqual(frostNet.enemyType, "tether", "frost net should force tether enemies");
+assert(frostNet.minTime >= tether.zoneMinTime, "frost net should start after ice zones are enabled");
 game.endless = true; game._endlessT = rearAssault.minTime; game.threat = 0; game.currentLevel = 0; game._rng = () => 0.999; game.player = { x: CONFIG.WIDTH / 2, y: CONFIG.HEIGHT - 100 };
 const rearChaser = new Enemy("kamikaze", CONFIG.WIDTH / 2, 0);
 assert.strictEqual(rearChaser.move, "rearChase", "kamikaze instances should default to rear chase");
@@ -177,9 +253,32 @@ rearChaser.update(0.5);
 assert(!rearChaser.dead, "kamikaze should not be culled before entering from behind");
 assert(rearChaser.y < rearStartY, "kamikaze should move toward the player from behind");
 const rearSpeedAt = mt => { rearChaser.x = CONFIG.WIDTH / 2; rearChaser.y = CONFIG.HEIGHT + rearChaser.radius; rearChaser.vx = 0; rearChaser.vy = 0; rearChaser._mt = mt; rearChaser.applyMove(0.1); return Math.hypot(rearChaser.vx, rearChaser.vy); };
-const rearWarnSpeed = rearSpeedAt(1), rearBoostSpeed = rearSpeedAt(2.2), rearNormalSpeed = rearSpeedAt(4.2);
+const rearWarnSpeed = rearSpeedAt(1), rearBoostSpeed = rearSpeedAt(2.2), rearNormalSpeed = rearSpeedAt(4.8);
 assert(rearBoostSpeed > rearWarnSpeed * 1.5, "kamikaze should accelerate after its 2 second warning");
 assert(rearNormalSpeed < rearBoostSpeed, "kamikaze should return to normal speed after its boost");
+game.player = { x: 220, y: 300, radius: 10, hp: 100, takeDamage(d) { this.hp -= d; }, applySlow(mult, dur) { this.slowMult = mult; this.slowTimer = dur; } };
+const homingBullet = new EnemyBullet(120, 300, 0, 160, 5, { kind: "homing", radius: 7, speed: 160, turn: 4, life: 3 });
+homingBullet.update(0.2);
+assert(homingBullet.vx > 0, "enemy homing bullet should turn toward the player");
+const fireZone = new EnemyBullet(game.player.x, game.player.y, 0, 0, 5, { kind: "fire", radius: 42, life: 2, tick: 0.6 });
+fireZone.update(0.1);
+assert.strictEqual(game.player.hp, 95, "fire zone should damage the player without disappearing immediately");
+assert(!fireZone.dead, "fire zone should persist after a hit");
+const iceZone = new EnemyBullet(game.player.x, game.player.y, 0, 0, 2, { kind: "ice", radius: 42, life: 2, slowMult: 0.55, slowDur: 1.2 });
+iceZone.update(0.1);
+assert(game.player.slowMult < 1 && game.player.slowTimer > 0, "ice zone should slow the player");
+game.enemyBullets = []; game.endless = true; game._endlessT = beacon.homingMinTime; game.threat = 0; game._rng = () => 0.99;
+const homingEnemy = new Enemy("beacon", 210, 0);
+homingEnemy.y = 120; homingEnemy._homingSkillTimer = 0; homingEnemy.updateHomingSkill(0);
+assert(game.enemyBullets.some(b => b.kind === "homing"), "beacon should spawn enemy homing bullets in endless");
+game.enemyBullets = []; game._endlessT = mineLayer.zoneMinTime;
+const fireEnemy = new Enemy("mineLayer", 210, 0);
+fireEnemy.y = 140; fireEnemy._zoneTimer = 0; fireEnemy.updateZoneSkill(0);
+assert(game.enemyBullets.some(b => b.kind === "fire"), "mineLayer should spawn fire zones in endless");
+game.enemyBullets = []; game._endlessT = tether.zoneMinTime;
+const iceEnemy = new Enemy("tether", 210, 0);
+iceEnemy.y = 140; iceEnemy._zoneTimer = 0; iceEnemy.updateZoneSkill(0);
+assert(game.enemyBullets.some(b => b.kind === "ice"), "tether should spawn ice zones in endless");
 game.enemyBullets = []; game.floats = []; game.endless = true; game._endlessT = crossfire.minTime; game.threat = 0; game._endlessHazardT = 0; game._rng = () => 0.25;
 assert.strictEqual(game.updateEndlessBulletEvent(0, crossfire), crossfire.bulletRows, "crossfire should spawn one side bullet row set");
 assert.strictEqual(game.enemyBullets.length, crossfire.bulletRows, "crossfire should create enemy bullets");
@@ -297,6 +396,27 @@ assert(game.draftCardWeight("bonus:eliteHunter") > eliteHunterBaseWeight, "elite
 game.drawChipChoices();
 assert(game._chipChoices.includes("bonus:eliteHunter"), "elite pressure draft should include eliteHunter");
 assert(game.draftEliteText(game.cardInfo("bonus:eliteHunter")).includes("精英"), "elite pressure cards should show counter text");
+const realBurst = game.burst;
+game.burst = () => {};
+game.player = {
+  x: 100, y: 100, hp: 50, maxHp: 100, energy: 0, shieldHp: 0,
+  addEnergy(n) { this.energy += n; },
+  heal(n) { this.hp = Math.min(this.maxHp, this.hp + n); },
+  grantShield(n, dur) { this.shieldHp = n; this.shieldTimer = dur; },
+};
+game.floats = []; game.shockwaves = []; game.enemies = [];
+game.enemyBullets = [{ x: 112, y: 100, dead: false }, { x: 310, y: 100, dead: false }];
+assert.strictEqual(game.applyDraftPickBuff(game.cardInfo("bonus:missileInterceptor")), true, "missileInterceptor pick buff should apply");
+assert(game.enemyBullets[0].dead && !game.enemyBullets[1].dead, "missileInterceptor pick buff should clear only nearby bullets");
+game.applyDraftPickBuff(game.cardInfo("chip:chargeCore"));
+assert.strictEqual(game.player.energy, CONFIG.chips.chargeCore.pickBuff.energy, "chargeCore pick buff should grant a small energy boost");
+game.applyDraftPickBuff(game.cardInfo("chip:capacitor"));
+assert(game.player.shieldHp > 0 && game.player.shieldTimer > 0, "capacitor pick buff should grant a small shield");
+game.applyDraftPickBuff(game.cardInfo("bonus:repairLoop"));
+assert(game.player.hp > 50, "repairLoop pick buff should immediately heal a little");
+assert(game.floats.some(f => f.text.includes("能量") || f.text.includes("护盾") || f.text.includes("修复") || f.text.includes("清弹")), "pick buffs should show float feedback");
+game.burst = realBurst;
+game.player = { power: CONFIG.powerup.chipMinPower, hp: 100, maxHp: 100 };
 game.state = "playing"; game._endlessT = CONFIG.powerup.chipMinEndlessTime - 0.01; game._lastChipDraftAt = -Infinity; game._nextChipDraftAt = 0; game._endlessStats = { drafts: 0 };
 assert.strictEqual(game.updateChipDraftTimer(), false, "draft timer should wait until the fixed delay");
 game._endlessT = CONFIG.powerup.chipMinEndlessTime;
@@ -374,7 +494,7 @@ for (const a of affixes) {
   if (a.hpMult) between(a.hpMult, 0.05, 0.45, `boss affix ${a.key} hpMult`);
   if (a.fireMult) between(a.fireMult, 0.65, 1, `boss affix ${a.key} fireMult`);
   if (a.attack) {
-    assert(["laser", "ring", "escort", "repair", "weak"].includes(a.attack), `boss affix ${a.key} has unknown attack ${a.attack}`);
+    assert(["laser", "ring", "escort", "repair", "weak", "gravity", "prismBurst"].includes(a.attack), `boss affix ${a.key} has unknown attack ${a.attack}`);
     between(a.every || 0, 3, 12, `boss affix ${a.key} interval`);
   }
   if (a.count) between(a.count, 6, 24, `boss affix ${a.key} count`);
@@ -397,6 +517,22 @@ assert(game.playerDamage(100, game.boss) > weakDamage, "weakScanner should incre
 game.floats = []; game.boss = { isBoss: true, x: 100, y: 100, radius: 40, hp: 100, maxHp: 100, affix: exposedCore, _weakTimer: 0 };
 game.openBossWeakPoint(game.boss, exposedCore);
 assert(game.boss._weakTimer > exposedCore.dur, "weakScanner should extend weak window duration");
+game._rng = () => 0; game.endless = false; game.floats = []; game.shockwaves = []; game.enemies = [];
+const lockBoss = new Boss(0);
+game.boss = lockBoss; game.enemies = [lockBoss];
+assert.strictEqual(lockBoss._invulnTotal, CONFIG.bossInvuln.minCount, "boss lock count should start at configured minimum");
+assert.strictEqual(lockBoss.damage(lockBoss.maxHp), false, "boss should lock HP instead of dying at the first lock threshold");
+assert.strictEqual(lockBoss.hp, Math.round(lockBoss.maxHp * 2 / 3), "boss first lock should clamp HP to the first threshold");
+between(lockBoss._invulnTimer, CONFIG.bossInvuln.minDuration, CONFIG.bossInvuln.maxDuration, "boss invuln timer");
+assert(game.bossAffixHUDText(lockBoss).includes("无敌"), "boss HUD should show invulnerability timing");
+const lockHp = lockBoss.hp;
+lockBoss.damage(lockBoss.maxHp);
+assert.strictEqual(lockBoss.hp, lockHp, "boss should ignore damage while invulnerable");
+lockBoss._invulnTimer = 0;
+assert.strictEqual(lockBoss.damage(lockBoss.maxHp), false, "boss should lock HP at the second threshold");
+assert.strictEqual(lockBoss.hp, Math.round(lockBoss.maxHp / 3), "boss second lock should clamp HP to the second threshold");
+lockBoss._invulnTimer = 0;
+assert.strictEqual(lockBoss.damage(lockBoss.maxHp), true, "boss should die after all lock charges are spent");
 game.bonuses = {}; game.enemyBullets = [{ dead: false }]; game.lasers = [{ dead: false }]; game.powerups = []; game.floats = []; game.player = { power: CONFIG.powerup.chipMinPower };
 const phaseBoss = { isBoss: true, x: 100, y: 120, radius: 40, hp: 100, maxHp: 100, _fireTimer: 0, def: { name: "PhaseTest", colors: ["#fff", "#ffd43b"], enterY: 120 } };
 game.onBossPhaseChange(phaseBoss, 1);
@@ -426,6 +562,7 @@ assert.strictEqual(game._endlessRecentBossAffixes[0], phantomEscort.key, "applie
 
 const bonusKeys = new Set(Object.keys(CONFIG.bonuses));
 for (const key of CONFIG.bonusOrder) assert(bonusKeys.has(key), `bonusOrder references missing bonus ${key}`);
+assert(!bonusKeys.has("pointDefense") && !CONFIG.bonusOrder.includes("pointDefense"), "pointDefense kill-clear bonus should stay removed");
 for (const key of ["maxHp", "reinforcedHull", "armorPlating", "fieldRepair", "repairLoop", "repairPulse", "leech", "livingArmor", "medicalReservoir", "painConverter", "armorCaliber", "vitalReactor", "stableFire", "perfectLine", "shieldAmplifier", "shieldBreaker", "signalFilter"]) {
   assert(bonusKeys.has(key), `missing survival/build bonus ${key}`);
 }

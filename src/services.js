@@ -217,14 +217,24 @@ const Challenge = {
     return (CONFIG.challenge && CONFIG.challenge.rulesVersion) || 1;
   },
   routeSignature(seed, rulesVersion) {
-    const e = CONFIG.endless || {}, spawn = e.spawn || {}, boss = e.boss || {};
+    const e = CONFIG.endless || {}, p = CONFIG.powerup || {}, spawn = e.spawn || {}, boss = e.boss || {};
     const splits = CONFIG.challenge && CONFIG.challenge.splits ? CONFIG.challenge.splits : [30, 60, 120];
+    const enemy = CONFIG.enemy || {}, skillKeys = ["gunner", "beacon", "mineLayer", "tether"];
+    const skillSig = skillKeys.map(k => {
+      const v = enemy[k] || {};
+      return [k, v.homingInterval, v.homingMinTime, v.homingSpeed, v.homingTurn, v.zoneKind, v.zoneMinTime, v.zoneInterval, v.zoneRadius, v.zoneDuration, v.zoneDamage, v.slowMult, v.slowDuration].join(",");
+    }).join(";");
+    const eventSig = (e.events || []).map(v => [v.key, v.minTime, v.enemyType, v.enemyChance, v.spawnBonus, v.enemyHpMult, v.scoreBonus, v.threatGainMult].join(",")).join(";");
     const parts = [
       "route-v1", seed || "", rulesVersion || this.rulesVersion(), e.diffKey || "", e.maxEnemies || 0,
-      e.worldInterval || 40, e.powerupChance || 0,
-      [e.startingDrafts, e.enemyHpBaseMult, e.enemyHpRampTime, e.enemyHpRampMult, e.dmgRampTime, e.dmgRampMult].join(","),
+      e.worldInterval || 40, e.powerupChance || 0, p.dropChance || 0,
+      [p.chipMinEndlessTime, p.chipDraftInterval, p.chipBossDraftDelay, p.chipMinDraftGap].join(","),
+      [e.eventClearScore, e.eventCleanShield, e.eventCleanShieldDur].join(","),
+      [e.startingDrafts, e.enemyHpBaseMult, e.enemyHpRampTime, e.enemyHpRampMult, e.dmgRampTime, e.dmgRampMult, e.dmgDoubleInterval].join(","),
       [spawn.initialDelay, spawn.intervalBase, spawn.intervalDecay, spawn.intervalMin, spawn.countBase, spawn.countStepSec, spawn.countStepMax].join(","),
-      [boss.firstDelay, boss.interval, boss.baseHpMult, boss.hpStep, boss.hpStepMax].join(","),
+      [boss.firstDelay, boss.interval, boss.baseHpMult, boss.hpStep].join(","),
+      skillSig,
+      eventSig,
       splits.join(","),
     ];
     const r = this.rng(parts.join("|")), probes = [];
