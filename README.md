@@ -4,8 +4,6 @@
 
 [在线试玩](https://ac-spider.github.io/skyward-raid-2077/) · [本地运行](#本地运行) · [开发说明](#开发说明)
 
-![Skyward Raid 2077 preview](assets/images/preview-contact-sheet.png)
-
 ## 亮点
 
 - **即开即玩**: 原生 HTML5 Canvas + JavaScript，无构建链，无安装步骤，`index.html` 和 `空中突袭.html` 都可作为入口。
