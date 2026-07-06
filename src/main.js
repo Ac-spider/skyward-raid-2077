@@ -9,6 +9,7 @@ const stars = {
   draw(ctx) { ctx.fillStyle = "rgba(255,255,255,.25)"; for (const p of this.items) ctx.fillRect(p.x, p.y, p.r, p.r * 3); },
 };
 
+ImageAssets.load();                                // 载入可选图片素材(无素材时不请求文件)
 Settings.load();                                   // 载入持久化设置(音量/音效/震动/上次难度)
 Progress.load();                                   // 载入关卡进度
 Achievements.load();                               // OO:载入成就进度
@@ -24,7 +25,9 @@ function loop(now) {
   if (game._hitStopT > 0) { game._hitStopT -= dt; game.draw(ctx); requestAnimationFrame(loop); return; }   // N:命中停顿(冻结逻辑,仍绘制)
   if (game.state !== "paused") { background.update(dt); stars.update(dt); }   // 暂停冻结背景
   Music.update(dt);                                                           // M:BGM 步进
+  if (window.Multiplayer) Multiplayer.update(dt);
   game.update(dt); game.draw(ctx);
+  if (window.Multiplayer) Multiplayer.draw(ctx);
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);

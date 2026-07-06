@@ -48,31 +48,62 @@ const Sound = {
 };
 
 /* =====================================================================
- * 1.52) BGM(M)—— 用户提供的循环音乐
+ * 1.52) BGM(M)—— 用户提供的轮播音乐
  * ===================================================================== */
 const Music = {
-  src: "assets/audio/above-the-sprawl.mp3",
-  playing: false, enabled: true, volume: 0.8, gain: 0.55, track: null,
+  tracks: [
+    { src: "assets/audio/above-the-sprawl.mp3", title: "Above the Sprawl" },
+    { src: "assets/audio/skyward-raid-bgm-02.m4a", title: "Skyward Raid BGM 02" },
+  ],
+  index: 0, playing: false, enabled: true, volume: 0.8, gain: 0.55, fade: 2.2, track: null,
+  playPending: false, autoplayBlocked: false,
   init() {
     if (this.track || typeof Audio === "undefined") return;
-    this.track = new Audio(this.src);
-    this.track.loop = true; this.track.preload = "auto";
-    this.applyVolume();
+    this.load(this.index);
   },
-  applyVolume() { if (this.track) this.track.volume = this.enabled ? clamp(this.volume * this.gain, 0, 1) : 0; },
+  load(index, autoplay) {
+    if (typeof Audio === "undefined") return;
+    if (this.track) { this.track.pause(); this.track.onended = null; }
+    this.playPending = false; this.autoplayBlocked = false;
+    this.index = (index + this.tracks.length) % this.tracks.length;
+    this.track = new Audio(this.tracks[this.index].src);
+    this.track.loop = false; this.track.preload = "auto"; this.track.onended = () => this.next();
+    this.applyVolume();
+    if (autoplay) this.resume();
+  },
+  title() {
+    return (this.tracks[this.index] && this.tracks[this.index].title) || "BGM";
+  },
+  next() {
+    this.load(this.index + 1, this.playing && this.enabled && this.volume > 0);
+  },
+  envelope() {
+    if (!this.track || this.fade <= 0) return 1;
+    const t = this.track.currentTime || 0, d = this.track.duration, fadeIn = clamp(t / this.fade, 0, 1);
+    const fadeOut = Number.isFinite(d) ? clamp((d - t) / this.fade, 0, 1) : 1;
+    return Math.min(fadeIn, fadeOut);
+  },
+  applyVolume() { if (this.track) this.track.volume = this.enabled ? clamp(this.volume * this.gain * this.envelope(), 0, 1) : 0; },
   play() { this.playing = true; this.init(); this.applyVolume(); this.resume(); },
   stop() { this.playing = false; if (this.track) this.track.pause(); },
-  resume() {
+  resume(force) {
     if (!this.playing || !this.enabled || this.volume <= 0) return;
     this.init();
     if (!this.track) return;
+    if (this.playPending && !force) return;
+    if (force) this.playPending = false;
+    this.autoplayBlocked = false;
     const p = this.track.play();
-    if (p && p.catch) p.catch(() => {});
+    if (p && p.then) {
+      this.playPending = true;
+      p.then(() => { this.playPending = false; }).catch(() => { this.playPending = false; this.autoplayBlocked = true; });
+    }
   },
   update() {
+    this.init();
     this.applyVolume();
     if (!this.playing || !this.enabled || this.volume <= 0) { if (this.track && !this.track.paused) this.track.pause(); return; }
-    if (this.track && this.track.paused) this.resume();
+    if (this.track && this.track.paused && !this.autoplayBlocked) this.resume();
   },
 };
 
@@ -151,6 +182,123 @@ const Leaderboard = {
   clearAll() { try { localStorage.removeItem(this.key); } catch (e) {} this._mem = {}; },
 };
 
+const Challenge = {
+  prefix: "SR2077-",
+  todayKey() {
+    const d = new Date(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
+    return String(d.getFullYear()) + m + day;
+  },
+  dailySeed() { return "DAILY-" + this.todayKey(); },
+  randomSeed() {
+    const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const n = Math.floor(Math.random() * 0x1000000).toString(36).toUpperCase().padStart(5, "0");
+    return "RAID-" + d + "-" + n;
+  },
+  hash(seed) {
+    let h = 2166136261;
+    const s = String(seed || "");
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  },
+  rng(seed) {
+    let a = this.hash(seed) || 1;
+    return () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  },
+  rulesVersion() {
+    return (CONFIG.challenge && CONFIG.challenge.rulesVersion) || 1;
+  },
+  routeSignature(seed, rulesVersion) {
+    const e = CONFIG.endless || {}, spawn = e.spawn || {}, boss = e.boss || {};
+    const splits = CONFIG.challenge && CONFIG.challenge.splits ? CONFIG.challenge.splits : [30, 60, 120];
+    const parts = [
+      "route-v1", seed || "", rulesVersion || this.rulesVersion(), e.diffKey || "", e.maxEnemies || 0,
+      e.worldInterval || 40, e.powerupChance || 0,
+      [spawn.initialDelay, spawn.intervalBase, spawn.intervalDecay, spawn.intervalMin, spawn.countBase, spawn.countStepSec, spawn.countStepMax].join(","),
+      [boss.firstDelay, boss.interval, boss.hpStep, boss.hpStepMax].join(","),
+      splits.join(","),
+    ];
+    const r = this.rng(parts.join("|")), probes = [];
+    for (let i = 0; i < 12; i++) probes.push(Math.floor(r() * 65536).toString(36));
+    return this.hash(parts.join("|") + "|" + probes.join(",")).toString(36).toUpperCase().padStart(6, "0").slice(-6);
+  },
+  routeStatus(payload) {
+    const local = this.routeSignature(payload && payload.seed, payload && payload.rules);
+    const code = String((payload && payload.sig) || local).toUpperCase().slice(0, 8);
+    return { code, local, ok: code === local };
+  },
+  cleanSplits(splits) {
+    if (!Array.isArray(splits)) return [];
+    const max = CONFIG.challenge && CONFIG.challenge.splits ? CONFIG.challenge.splits.length : 3;
+    return splits.map(s => ({ t: Math.floor(Number(s.t) || 0), score: Math.max(0, Math.round(Number(s.score) || 0)) })).filter(s => s.t > 0).slice(0, max);
+  },
+  encode(run) {
+    const splits = this.cleanSplits(run.splits);
+    const seed = String(run.seed || this.randomSeed()), rules = run.rulesVersion || run.rules || this.rulesVersion();
+    const payload = {
+      v: 1,
+      mode: "endless",
+      seed,
+      ship: run.ship || "balanced",
+      score: run.score || 0,
+      time: run.time || 0,
+      combo: run.combo || 0,
+      rules,
+      sig: run.sig || this.routeSignature(seed, rules),
+    };
+    if (splits.length) payload.splits = splits;
+    const raw = btoa(JSON.stringify(payload)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    return this.prefix + raw;
+  },
+  decode(text) {
+    try {
+      let raw = String(text || "").trim();
+      if (!raw) return null;
+      if (raw.startsWith(this.prefix)) raw = raw.slice(this.prefix.length);
+      raw = raw.replace(/-/g, "+").replace(/_/g, "/");
+      while (raw.length % 4) raw += "=";
+      const payload = JSON.parse(atob(raw));
+      if (!payload || payload.v !== 1 || payload.mode !== "endless" || !payload.seed) return null;
+      payload.rules = payload.rules || 1;
+      payload.splits = this.cleanSplits(payload.splits);
+      const route = this.routeStatus(payload);
+      payload.sig = route.code; payload.localSig = route.local; payload.sigOk = route.ok;
+      return payload;
+    } catch (e) {
+      return null;
+    }
+  },
+};
+
+const ChallengeHistory = {
+  key: "kzts_challenges", max: 8, _mem: [],
+  id(seed, ship) { return String(seed || "") + "|" + String(ship || "balanced"); },
+  load() { try { return JSON.parse(localStorage.getItem(this.key)) || []; } catch (e) { return this._mem; } },
+  saveList(list) { try { localStorage.setItem(this.key, JSON.stringify(list)); } catch (e) { this._mem = list; } },
+  best(seed, ship) { return this.load().find(r => r.id === this.id(seed, ship)) || null; },
+  submit(run) {
+    const list = this.load(), id = this.id(run.seed, run.ship), ts = new Date().toISOString();
+    let entry = list.find(r => r.id === id);
+    if (!entry) { entry = { id, seed: run.seed, ship: run.ship, score: 0, time: 0, combo: 0, attempts: 0, ts }; list.unshift(entry); }
+    entry.attempts = (entry.attempts || 0) + 1; entry.ts = ts; entry.lastScore = run.score; entry.lastTime = run.time; entry.lastCode = run.code || entry.lastCode;
+    entry.lastSplits = Challenge.cleanSplits(run.splits);
+    entry.daily = !!run.daily;
+    if (run.score >= (entry.score || 0)) { entry.score = run.score; entry.time = run.time; entry.combo = run.combo; entry.splits = entry.lastSplits; entry.code = run.code || entry.code; entry.date = ts.slice(0, 10); }
+    list.sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")));
+    this.saveList(list.slice(0, this.max));
+    return entry;
+  },
+  clearAll() { try { localStorage.removeItem(this.key); } catch (e) {} this._mem = []; },
+};
+
 // F:无尽模式独立排行榜
 const EndlessBoard = {
   key: "kzts_endless", max: 5, _mem: [],
@@ -206,7 +354,7 @@ const Achievements = {
 // PP:存档导入导出 —— 单文件双击运行没有后端也没有文件下载习惯,用 window.prompt 展示/读取 JSON 文本最省事,
 // 复制粘贴即可备份/换设备,零依赖不用引入任何下载/剪贴板 API。
 const SaveData = {
-  keys: ["kzts_settings", "kzts_progress", "kzts_scores", "kzts_endless", "kzts_achievements"],
+  keys: ["kzts_settings", "kzts_progress", "kzts_scores", "kzts_endless", "kzts_challenges", "kzts_achievements"],
   exportAll() {
     const out = { _game: "skywardRaid2077", _v: 1 };
     for (const k of this.keys) { const v = localStorage.getItem(k); if (v != null) out[k] = v; }

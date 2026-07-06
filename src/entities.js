@@ -8,7 +8,7 @@ class Player {
     const c = CONFIG.player, ship = game.ship;
     this.ship = ship;
     this.x = c.startX; this.y = c.startY; this.radius = c.radius * (ship.radiusMult || 1);
-    this.maxHp = Math.round(c.maxHp * ship.hpMult * (game.endless ? CONFIG.endless.hpMult : 1)); this.hp = this.maxHp;
+    this.maxHp = Math.round(c.maxHp * ship.hpMult * (game.endless ? CONFIG.endless.hpMult : 1)); this.baseMaxHp = this.maxHp; this.hp = this.maxHp;
     this.fireInterval = c.fireInterval * ship.fireMult;
     this.power = 1; this.overcharge = 0;
     this.bombs = clamp(game.activeDiff.startBombs + ship.bombs, 0, CONFIG.player.maxBombs);
@@ -17,6 +17,7 @@ class Player {
     this.specialCooldown = 0;    // Q:必杀冷却(秒),能量满 + 冷却结束才可释放
     this.invulnAmount = game.activeDiff.invuln;
     this._fireTimer = 0; this._homingTimer = 0; this._laserTimer = 0; this._missileTimer = 0;
+    this.charge = 0; this.charging = false; this.chargeCooldown = 0;
     this.invulnTimer = 0; this._flameTimer = 0;   // RR:引擎尾焰粒子发射计时
     // X4:机型专属必杀状态——护盾(防御型)/隐身(侦查型)。攻击型必杀(全屏重伤)/平衡型必杀(冲击波)不需要常驻状态,现开现用。
     this.shieldHp = 0; this.shieldMax = 0; this.shieldTimer = 0; this.stealthTimer = 0;
@@ -33,6 +34,8 @@ class Player {
     this.x = clamp(this.x, this.radius, CONFIG.WIDTH - this.radius); this.y = clamp(this.y, this.radius, CONFIG.HEIGHT - this.radius);
     if (this.invulnTimer > 0) this.invulnTimer -= dt;
     if (this.specialCooldown > 0) this.specialCooldown -= dt;
+    if (this.chargeCooldown > 0) this.chargeCooldown -= dt;
+    if (this.charging) this.charge = Math.min(CONFIG.charge.max, this.charge + dt * game.chipValue("chargeCore", "chargeRate", 1) * game.shipWeaponValue("chargeRate", 1));
     if (this.stealthTimer > 0) this.stealthTimer -= dt;
     if (this.shieldTimer > 0) { this.shieldTimer -= dt; if (this.shieldTimer <= 0) { this.shieldHp = 0; this.shieldMax = 0; } }
     this.addEnergy(CONFIG.special.passiveGainPerSec * dt);   // X3:必杀能量随时间缓慢自然回复,不完全依赖击杀
@@ -41,35 +44,57 @@ class Player {
     if (this._flameTimer <= 0) { this._flameTimer = 0.03; game.spawnEngineFlame(this.x, this.y + 11); }
     this._fireTimer -= dt;
     if (this._fireTimer <= 0) {
-      this._fireTimer = this.fireInterval;
+      this._fireTimer = this.fireInterval * game.mainGunCooldownMult();
       const pattern = CONFIG.weapon[clamp(this.power, 1, c.maxPower)];
       for (const s of pattern) { const rad = s.deg * DEG; game.spawnPlayerBullet(this.x + s.ox, this.y - this.radius, Math.sin(rad) * c.bulletSpeed, -Math.cos(rad) * c.bulletSpeed); }
       for (let i = 0; i < this.wings; i++) game.spawnPlayerBullet(this.x + wingOffsetX(i), this.y + 4, 0, -c.bulletSpeed);   // 僚机直射(任意数量排布)
+      const side = game.bonusStacks("sideCannons"), sideCfg = CONFIG.bonuses.sideCannons;
+      for (let i = 1, n = Math.min(side, sideCfg.maxPairs); i <= n; i++) {
+        const a = (sideCfg.angle + (i - 1) * 6) * DEG, ox = sideCfg.offset * i;
+        game.spawnPlayerBullet(this.x - ox, this.y, -Math.sin(a) * c.bulletSpeed, -Math.cos(a) * c.bulletSpeed);
+        game.spawnPlayerBullet(this.x + ox, this.y, Math.sin(a) * c.bulletSpeed, -Math.cos(a) * c.bulletSpeed);
+      }
+      if (game.chipActive("sideGuns")) {
+        const a = CONFIG.chips.sideGuns.angle * DEG;
+        game.spawnPlayerBullet(this.x - 18, this.y, -Math.sin(a) * c.bulletSpeed, -Math.cos(a) * c.bulletSpeed);
+        game.spawnPlayerBullet(this.x + 18, this.y, Math.sin(a) * c.bulletSpeed, -Math.cos(a) * c.bulletSpeed);
+      }
       Sound.shoot();
     }
     this.updateSecondaries(dt);
   }
   updateSecondaries(dt) {
-    const s = CONFIG.secondary, oc = this.overcharge || 0;
+    const s = CONFIG.secondary, oc = this.overcharge || 0, allCd = game.shipWeaponValue("cooldownMult", 1);
     if (this.power >= s.homingPower) {
       this._homingTimer -= dt;
       if (this._homingTimer <= 0) {
-        this._homingTimer = Math.max(0.32, s.homingInterval - oc * 0.05);
-        const count = 1 + (oc >= 3 ? 1 : 0);
+        this._homingTimer = Math.max(0.24, (s.homingInterval - oc * 0.05) * game.chipValue("homingSwarm", "intervalMult", 1) * game.shipWeaponValue("homingIntervalMult", 1) * allCd * game.weaponCooldownMult() * (1 - game.routeBonus("追踪", 0.10)));
+        const count = 1 + (oc >= 3 ? 1 : 0) + game.chipValue("homingSwarm", "extraCount", 0) + game.bonusValue("swarmCore", "extraCount") + (game.routeReady("追踪") ? 1 : 0);
         for (let i = 0; i < count; i++) game.spawnHomingShot(this.x + (i - (count - 1) / 2) * 18, this.y - this.radius, oc);
         Sound.homing();
       }
     }
     if (this.power >= s.laserPower) {
       this._laserTimer -= dt;
-      if (this._laserTimer <= 0) { this._laserTimer = Math.max(0.55, s.laserInterval - oc * 0.06); game.spawnPlayerLaser(this.x, this.y - this.radius, oc); Sound.laser(); }
+      if (this._laserTimer <= 0) {
+        this._laserTimer = Math.max(0.55, (s.laserInterval - oc * 0.06) * game.shipWeaponValue("laserIntervalMult", 1) * allCd * game.weaponCooldownMult());
+        game.spawnPlayerLaser(this.x, this.y - this.radius, oc);
+        const split = game.bonusStacks("laserSplitter"), cfg = CONFIG.bonuses.laserSplitter;
+        for (let i = 1, n = Math.min(split, cfg.maxPairs); i <= n; i++) {
+          game.spawnPlayerLaser(this.x - cfg.offset * i, this.y - this.radius, oc, cfg.damageMult, cfg.widthMult);
+          game.spawnPlayerLaser(this.x + cfg.offset * i, this.y - this.radius, oc, cfg.damageMult, cfg.widthMult);
+        }
+        Sound.laser();
+      }
     }
     if (this.power >= s.missilePower) {
       this._missileTimer -= dt;
       if (this._missileTimer <= 0) {
-        this._missileTimer = Math.max(0.75, s.missileInterval - oc * 0.04);
-        game.spawnMissile(this.x - 16, this.y + 4, oc);
-        game.spawnMissile(this.x + 16, this.y + 4, oc);
+        this._missileTimer = Math.max(0.45, (s.missileInterval - oc * 0.04) * game.chipValue("missileBarrage", "intervalMult", 1) * game.shipWeaponValue("missileIntervalMult", 1) * allCd * game.weaponCooldownMult() * Math.max(0.6, 1 - game.bonusValue("missileRack", "missileCooldownMult")));
+        const xs = [-16, 16], extra = game.chipValue("missileBarrage", "extraCount", 0) + game.bonusValue("missileRack", "missileCount") + game.missileVolleyBonus();
+        if (extra >= 1) xs.push(0);
+        if (extra >= 2) xs.push(-32, 32);
+        for (const ox of xs) game.spawnMissile(this.x + ox, this.y + 4, oc);
         Sound.missile();
       }
     }
@@ -77,13 +102,28 @@ class Player {
   // X4:护盾(防御型必杀)优先吸收伤害——盾量池打光了溢出部分才真正扣血;隐身(侦查型必杀)期间和普通受击无敌一样完全免伤
   takeDamage(d) {
     if (this.invulnTimer > 0 || this.stealthTimer > 0) return;
-    let dmg = d * (this.ship.dmgTakenMult || 1);
+    let dmg = d * (this.ship.dmgTakenMult || 1) * game.chipValue("volatileCore", "damageTakenMult", 1) * game.damageTakenMult(), blocked = false;
     if (this.shieldHp > 0) {
       game.spawnShieldHitSpark(this.x, this.y);
+      blocked = true;
       if (dmg <= this.shieldHp) { this.shieldHp -= dmg; dmg = 0; }
       else { dmg -= this.shieldHp; this.shieldHp = 0; this.shieldTimer = 0; }
     }
+    if (dmg > 0 && game.chipActive("capacitor") && this.overcharge > 0) {
+      const block = Math.min(dmg, CONFIG.chips.capacitor.block);
+      dmg -= block; this.overcharge--; blocked = true;
+      game.spawnShieldHitSpark(this.x, this.y);
+      game.floats.push(new FloatText(this.x, this.y - 46, "电容格挡 -" + Math.round(block), CONFIG.chips.capacitor.color));
+    }
+    const hpBefore = this.hp;
     if (dmg > 0) this.hp -= dmg;
+    if (dmg > 0) game.tryLastStand(this);
+    const hpLoss = Math.max(0, Math.min(hpBefore, hpBefore - this.hp));
+    game.recordEndlessDamage(hpLoss, blocked);
+    if (hpLoss > 0) game.triggerPainConverter(this, hpLoss);
+    if (blocked) game.triggerReactiveArmor(this);
+    if (dmg > 0) game.tryEmergencyBarrier(this);
+    game.onPlayerHit(blocked);
     this.invulnTimer = this.invulnAmount; Sound.hit(); Haptics.hit(); game.addShake(4, 0.12); if (CONFIG.combo.resetOnHit) game.breakCombo();
   }
   addPower() {
@@ -94,6 +134,12 @@ class Player {
   addWing()    { this.wings = clamp(this.wings + 1, 0, CONFIG.wingMax); }
   addEnergy(n) { this.energy = clamp(this.energy + n * (this.ship.energyMult || 1), 0, 100); }
   heal(n)      { this.hp = clamp(this.hp + n, 0, this.maxHp); }
+  grantShield(n, dur) {
+    this.shieldHp = Math.max(this.shieldHp, n);
+    this.shieldMax = Math.max(this.shieldMax, n);
+    this.shieldTimer = Math.max(this.shieldTimer, dur);
+    game.spawnShockwave(this.x, this.y, this.radius * 2.2, "#74c0fc");
+  }
   // X4:原来的机身绘制拆成 _drawBody,供隐身态(稳定半透明)和正常态共用,避免复制一遍
   _drawBody(ctx) {
     const x = this.x, y = this.y;
@@ -150,6 +196,7 @@ class Player {
 // QQ:机翼/机身/座舱全部改渐变(取代纯色)+ 机翼加柔和投影,做出立体感;原始剪影坐标完全不变。
 function drawShipBody(ctx, x, y, ship) {
   const col = ship.color, s = ship.radiusMult || 1, shape = ship.bodyShape || "delta";
+  if (ImageAssets.draw(ctx, ImageAssets.player(ship.key), x, y, 64 * s)) return;
   ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
   const wingGrad = ctx.createLinearGradient(0, -4, 0, 16);
   wingGrad.addColorStop(0, "#3d4f70"); wingGrad.addColorStop(1, "#161d2b");
@@ -187,7 +234,7 @@ function drawShipBody(ctx, x, y, ship) {
 // DD:constructor 委托给 init(),配合下面的 Pool 复用实例(无尽模式长时间跑,减少高频 new 的 GC 压力)
 class PlayerBullet {
   constructor(x, y, vx, vy) { this.init(x, y, vx, vy); }
-  init(x, y, vx, vy) { this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.radius = CONFIG.bullet.radius; this.dead = false; }
+  init(x, y, vx, vy) { this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.radius = CONFIG.bullet.radius; this.pierce = game.bonusValue("pierce", "pierce"); this.hitEnemies = new Set(); this.dead = false; }
   update(dt) { this.x += this.vx * dt; this.y += this.vy * dt; if (this.y < -20 || this.x < -20 || this.x > CONFIG.WIDTH + 20) this.dead = true; }
   // QQ:纯色改渐变(弹头亮白、弹尾橙),做出"能量弹"质感;不用 shadowBlur(子弹多,省性能)
   draw(ctx) {
@@ -214,15 +261,17 @@ class HomingShot {
   init(x, y, overcharge = 0) {
     const s = CONFIG.secondary;
     this.x = x; this.y = y; this.overcharge = overcharge; this.radius = s.homingRadius;
-    this.speed = s.homingSpeed + overcharge * 28; this.turn = s.homingTurn + overcharge * 0.55; this.damage = s.homingDamage + Math.floor(overcharge / 2);
+    this.speed = s.homingSpeed + overcharge * 28; this.turn = s.homingTurn + overcharge * 0.55 + game.shipWeaponValue("homingTurnBonus", 0); this.damage = s.homingDamage + Math.floor(overcharge / 2) + game.chipValue("homingSwarm", "damageBonus", 0) + game.shipWeaponValue("homingDamageBonus", 0) + game.bonusValue("swarmCore", "homingDamage");
+    this.targetRange = game.chipValue("homingSwarm", "targetRange", 300) * game.rangeMult() * (1 + game.bonusValue("swarmCore", "targetRangeMult"));
     this.vx = 0; this.vy = -this.speed; this.dead = false; this.life = 2.6;
   }
   update(dt) {
-    const target = game.nearestEnemy(this.x, this.y, 300);
+    const jam = game.jamFactor(this.x, this.y);
+    const target = game.nearestEnemy(this.x, this.y, this.targetRange / jam);
     if (target) {
       const a = Math.atan2(target.y - this.y, target.x - this.x);
       const tx = Math.cos(a) * this.speed, ty = Math.sin(a) * this.speed;
-      const k = clamp(this.turn * dt, 0, 1);
+      const k = clamp((this.turn / jam) * dt, 0, 1);
       this.vx += (tx - this.vx) * k; this.vy += (ty - this.vy) * k;
     }
     this.x += this.vx * dt; this.y += this.vy * dt; this.life -= dt;
@@ -243,15 +292,16 @@ class Missile {
   init(x, y, overcharge = 0) {
     const s = CONFIG.secondary;
     this.x = x; this.y = y; this.overcharge = overcharge; this.radius = 8;
-    this.speed = s.missileSpeed + overcharge * 18; this.turn = s.missileTurn + overcharge * 0.25; this.damage = s.missileDamage + overcharge;
-    this.splash = s.missileSplash + overcharge * 5; this.vx = 0; this.vy = -this.speed; this.dead = false; this.life = 3.5;
+    this.speed = s.missileSpeed + overcharge * 18; this.turn = s.missileTurn + overcharge * 0.25; this.damage = s.missileDamage + overcharge + game.chipValue("missileBarrage", "damageBonus", 0) + game.shipWeaponValue("missileDamageBonus", 0) + game.bonusValue("explosivePayload", "missileDamage") + game.routeBonus("导弹", 3);
+    this.splash = (s.missileSplash + overcharge * 5) * game.chipValue("missileBarrage", "splashMult", 1) * game.shipWeaponValue("missileSplashMult", 1) * (1 + game.bonusValue("explosivePayload", "splashMult") + game.routeBonus("导弹", 0.18)); this.vx = 0; this.vy = -this.speed; this.dead = false; this.life = 3.5 * game.rangeMult();
   }
   update(dt) {
-    const target = game.nearestEnemy(this.x, this.y, 360);
+    const jam = game.jamFactor(this.x, this.y);
+    const target = game.nearestEnemy(this.x, this.y, 360 * game.rangeMult() / jam);
     if (target) {
       const a = Math.atan2(target.y - this.y, target.x - this.x);
       const tx = Math.cos(a) * this.speed, ty = Math.sin(a) * this.speed;
-      const k = clamp(this.turn * dt, 0, 1);
+      const k = clamp((this.turn / jam) * dt, 0, 1);
       this.vx += (tx - this.vx) * k; this.vy += (ty - this.vy) * k;
     }
     this.x += this.vx * dt; this.y += this.vy * dt; this.life -= dt;
@@ -270,11 +320,18 @@ class Missile {
 }
 
 class PlayerLaser {
-  constructor(x, y, overcharge = 0) { this.init(x, y, overcharge); }
-  init(x, y, overcharge = 0) {
+  constructor(x, y, overcharge = 0, damageMult = 1, widthMult = 1) { this.init(x, y, overcharge, damageMult, widthMult); }
+  init(x, y, overcharge = 0, damageMult = 1, widthMult = 1) {
     const s = CONFIG.secondary;
     this.x = x; this.y = y; this.overcharge = overcharge; this.width = s.laserWidth + overcharge * 3;
-    this.damage = s.laserDamage + Math.floor(overcharge / 2); this.life = s.laserDuration + overcharge * 0.01; this.maxLife = this.life; this.dead = false; this.hitEnemies = new Set();
+    this.damage = s.laserDamage + Math.floor(overcharge / 2) + game.shipWeaponValue("laserDamageBonus", 0) + game.bonusValue("laserLens", "laserDamage") + game.routeBonus("激光", 2); this.life = (s.laserDuration + overcharge * 0.01 + game.bonusValue("laserLens", "laserDuration")) * game.rangeMult() * (1 + game.routeBonus("激光", 0.12));
+    this.width *= Math.max(0.52, 1 - game.bonusValue("laserLens", "laserWidthShrink"));
+    if (game.chipActive("laserFocus")) {
+      const c = CONFIG.chips.laserFocus;
+      this.width *= c.laserWidthMult; this.damage += c.laserDamageBonus; this.life += c.laserDurationBonus;
+    }
+    this.damage *= damageMult; this.width *= widthMult;
+    this.maxLife = this.life; this.dead = false; this.hitEnemies = new Set();
   }
   update(dt) { this.life -= dt; if (this.life <= 0) this.dead = true; }
   draw(ctx) {
@@ -289,16 +346,35 @@ class PlayerLaser {
 }
 
 class Enemy {
-  constructor(type, x, yOffset = 0, move = "straight") { this.init(type, x, yOffset, move); }
-  init(type, x, yOffset = 0, move = "straight") {
+  constructor(type, x, yOffset = 0, move = "straight", elite = null) { this.init(type, x, yOffset, move, elite); }
+  init(type, x, yOffset = 0, move = "straight", elite = null) {
     const t = CONFIG.enemy[type];
     this.type = type; this.isBoss = false; this.x = x; this.y = -t.radius - yOffset;
     this.baseX = x; this.baseY = this.y; this.radius = t.radius; this.hp = t.hp; this.speed = t.speed; this.score = t.score; this.color = t.color; this.cfg = t;
-    this._fireTimer = 0.6 + Math.random() * 0.6; this.dead = false;
+    this._fireTimer = 0.6 + game.rng() * 0.6; this.dead = false;
+    this.elite = elite || this.rollElite(); this.eliteCfg = this.elite ? CONFIG.elite[this.elite] : null;
+    const hpMult = game.endless ? game.endlessEnemyHpMult() : 1;
+    this.eliteShieldMax = 0; this.eliteShield = 0; this._eliteCd = 1.2 + game.rng(); this._eliteWarn = 0;
+    if (game.endless) this.hp = Math.max(1, Math.round(this.hp * hpMult));
+    if (this.eliteCfg) { this.hp = Math.round(this.hp * (this.eliteCfg.hpMult || 1)); this.score = Math.round(this.score * (this.eliteCfg.scoreMult || 1)); }
+    if (this.eliteCfg && this.eliteCfg.speedMult) this.speed *= this.eliteCfg.speedMult;
+    this.eliteShieldMax = Math.round((t.shield || 0) * hpMult) + (this.eliteCfg && this.eliteCfg.shield ? this.eliteCfg.shield : 0);
+    this.eliteShield = this.eliteShieldMax;
+    this.maxHp = this.hp;
     // 运动状态
     this.move = move; this.mp = CONFIG.moves[move] || {}; this._mt = 0;
     this.phase = "in"; this._ht = 0; this._aimed = false; this.vx = 0; this.vy = 0; this._flash = 0;
     this._carrierSpawn = 0;   // W2:carrier 裂解出的僚机短暂带一圈紫色识别环,归零后就是普通敌机(池复用要清零,不然会带着上一轮的状态)
+    this._sniperWarn = 0; this._sniperAim = 0;
+    this._supportTimer = (t.repairInterval || 0) * (0.45 + game.rng() * 0.25); this._supportPulse = 0; this._armorPierceFx = 0;
+  }
+  rollElite() {
+    if (this.type === "small" || !game.player) return null;
+    const e = CONFIG.elite;
+    let chance = game.currentLevel >= e.minLevel ? e.baseChance + game.currentLevel * e.levelChance : 0;
+    if (game.endless) chance = e.endlessChance + game.threatLevel() * e.threatChance + Math.min(game._endlessT / 900, 0.08);
+    if (game.rng() > Math.min(chance, e.maxChance)) return null;
+    return game.pick(e.types || ["shield", "charger"]);
   }
   applyMove(dt) {
     const W = CONFIG.WIDTH, m = this.mp;
@@ -328,17 +404,78 @@ class Enemy {
     this._mt += dt;
     if (this._flash > 0) this._flash -= dt;
     if (this._carrierSpawn > 0) this._carrierSpawn -= dt;
+    if (this._armorPierceFx > 0) this._armorPierceFx -= dt;
     this.applyMove(dt);
+    this.updateElite(dt);
+    this.updateSupport(dt);
     if (this.y > CONFIG.HEIGHT + this.radius || this.x < -70 || this.x > CONFIG.WIDTH + 70) this.dead = true;
     if (this.cfg.fireInterval > 0 && this.y > 0 && this.y < CONFIG.HEIGHT * 0.7 && game.player) {
       this._fireTimer -= dt;
-      if (this._fireTimer <= 0) { this._fireTimer = this.cfg.fireInterval * game.activeDiff.fireMult; const aim = Math.atan2(game.player.y - this.y, game.player.x - this.x); game.fireFan(this.x, this.y, aim, 22 * DEG, this.cfg.shots, this.cfg.bulletSpeed, this.cfg.damage); }
+      if (this.type === "sniper" && this._sniperWarn > 0) {
+        this._sniperWarn -= dt;
+        const fireMult = this.eliteCfg && this.eliteCfg.fireMult ? this.eliteCfg.fireMult : 1;
+        if (this._sniperWarn <= 0) { this._fireTimer = this.cfg.fireInterval * game.activeDiff.fireMult * fireMult; game.fireFan(this.x, this.y, this._sniperAim, 22 * DEG, this.cfg.shots, this.cfg.bulletSpeed, this.cfg.damage); }
+      } else if (this._fireTimer <= 0) {
+        const aim = Math.atan2(game.player.y - this.y, game.player.x - this.x);
+        const fireMult = this.eliteCfg && this.eliteCfg.fireMult ? this.eliteCfg.fireMult : 1;
+        if (this.type === "sniper") { this._sniperAim = aim; this._sniperWarn = this.cfg.warn || 0.55; }
+        else { this._fireTimer = this.cfg.fireInterval * game.activeDiff.fireMult * fireMult; game.fireFan(this.x, this.y, aim, 22 * DEG, this.cfg.shots, this.cfg.bulletSpeed, this.cfg.damage); }
+      }
     }
   }
-  damage(d) { this.hp -= d; this._flash = 0.06; if (this.hp <= 0) { this.dead = true; return true; } return false; }
+  updateElite(dt) {
+    if (!this.eliteCfg || this.y <= 0 || this.y >= CONFIG.HEIGHT * 0.76) return;
+    if (this.elite === "repair") {
+      this._eliteCd -= dt;
+      if (this._eliteCd > 0) return;
+      this._eliteCd = this.eliteCfg.regenEvery || 2.6;
+      if (this.hp >= this.maxHp) return;
+      const before = this.hp, heal = Math.max(1, Math.round(this.maxHp * (this.eliteCfg.regenPct || 0.06)));
+      this.hp = Math.min(this.maxHp, this.hp + heal);
+      game.floats.push(new FloatText(this.x, this.y - this.radius - 18, "再生 +" + Math.round(this.hp - before), this.eliteCfg.color));
+      return;
+    }
+    if (this.elite !== "charger" || !game.player) return;
+    if (this._eliteWarn > 0) {
+      this._eliteWarn -= dt;
+      if (this._eliteWarn <= 0) {
+        const c = this.eliteCfg, a = Math.atan2(game.player.y - this.y, game.player.x - this.x);
+        game.fireFan(this.x, this.y, a, c.spread * DEG, c.count, c.speed, this.cfg.damage * c.damageMult);
+        Sound.tone(860, 0.08, "sawtooth", 0.12, 220);
+        this._eliteCd = c.cd;
+      }
+      return;
+    }
+    this._eliteCd -= dt;
+    if (this._eliteCd <= 0) this._eliteWarn = this.eliteCfg.warn;
+  }
+  updateSupport(dt) {
+    if (this._supportPulse > 0) this._supportPulse -= dt;
+    if (this.type !== "support" || this.y <= 0 || this.y >= CONFIG.HEIGHT * 0.78) return;
+    this._supportTimer -= dt;
+    if (this._supportTimer > 0) return;
+    this._supportTimer = this.cfg.repairInterval || 2.4;
+    if (game.repairNearbyEnemies(this) > 0) this._supportPulse = 0.45;
+  }
+  damage(d) {
+    if (this.eliteShield > 0) {
+      const mult = 1 + game.bonusValue("shieldBreaker", "shieldDamageMult");
+      const used = Math.min(this.eliteShield, d * mult);
+      this.eliteShield -= used; d -= used / mult; this._flash = 0.06;
+      if (this.eliteShield <= 0) game.triggerShieldBreak(this);
+      if (this.eliteShield > 0) return false;
+    }
+    this.hp -= d; this._flash = 0.06; if (this.hp <= 0) { this.dead = true; return true; } return false;
+  }
   // QQ:主体色改渐变(受光面亮/边缘暗)+ 整体加柔和投影,取代纯色平涂,读起来更有质感
   draw(ctx) {
     const x = this.x, y = this.y, r = this.radius, t = this.type;
+    if (this._flash <= 0 && ImageAssets.draw(ctx, ImageAssets.enemy(t), x, y, r * 2.8)) {
+      this.drawCarrierSpawnRing(ctx);
+      this.drawRoleAura(ctx);
+      this.drawEliteMark(ctx);
+      return;
+    }
     let c;
     if (this._flash > 0) c = "#fff";
     else { c = ctx.createRadialGradient(x - r * 0.3, y - r * 0.35, r * 0.1, x, y, r); c.addColorStop(0, UI.shade(this.color, 0.4)); c.addColorStop(1, UI.shade(this.color, -0.25)); }
@@ -385,17 +522,90 @@ class Enemy {
       ctx.fillStyle = "#2b1a4a"; ctx.beginPath(); ctx.arc(x - r * 0.55, y + r * 0.15, r * 0.18, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(x + r * 0.55, y + r * 0.15, r * 0.18, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = "#e5dbff"; ctx.beginPath(); ctx.arc(x, y - r * 0.15, r * 0.24, 0, Math.PI * 2); ctx.fill();
+    } else if (t === "shieldCarrier") {
+      ctx.beginPath(); ctx.moveTo(x - r * 0.85, y - r * 0.25); ctx.lineTo(x - r * 0.35, y - r * 0.75); ctx.lineTo(x + r * 0.35, y - r * 0.75); ctx.lineTo(x + r * 0.85, y - r * 0.25); ctx.lineTo(x + r * 0.55, y + r * 0.65); ctx.lineTo(x - r * 0.55, y + r * 0.65); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "#d0ebff"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x - r * 0.55, y - r * 0.05); ctx.lineTo(x + r * 0.55, y - r * 0.05); ctx.moveTo(x, y - r * 0.52); ctx.lineTo(x, y + r * 0.45); ctx.stroke();
+      ctx.fillStyle = "#e7f5ff"; ctx.beginPath(); ctx.arc(x, y + r * 0.05, r * 0.25, 0, Math.PI * 2); ctx.fill();
+    } else if (t === "jammer") {
+      ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x - r * 0.85, y); ctx.lineTo(x, y + r); ctx.lineTo(x + r * 0.85, y); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "#99e9f2"; ctx.lineWidth = 2;
+      for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(x, y, r * (0.32 + k * 0.22), 0, Math.PI * 2); ctx.stroke(); }
+      ctx.fillStyle = "#e3fafc"; ctx.beginPath(); ctx.arc(x, y, r * 0.18, 0, Math.PI * 2); ctx.fill();
+    } else if (t === "support") {
+      ctx.beginPath(); ctx.arc(x, y, r * 0.78, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#e6fcf5"; ctx.fillRect(x - 4, y - r * 0.45, 8, r * 0.9); ctx.fillRect(x - r * 0.45, y - 4, r * 0.9, 8);
+      ctx.strokeStyle = UI.shade(this.color, -0.35); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r * 0.95, 0, Math.PI * 2); ctx.stroke();
     } else {                                    // 小型:轻型截击机
       ctx.beginPath(); ctx.moveTo(x, y + r); ctx.lineTo(x - r, y - r * 0.8); ctx.lineTo(x, y - r * 0.35); ctx.lineTo(x + r, y - r * 0.8); ctx.closePath(); ctx.fill();
     }
     ctx.restore();
     // W2:carrier 裂解出的僚机短暂带一圈脉动紫环,提示玩家"这是母舰刚炸出来的",1秒后自然消失,不需要额外状态清理
-    if (this._carrierSpawn > 0) {
-      ctx.save(); ctx.globalAlpha = clamp(this._carrierSpawn, 0, 1) * 0.8;
-      ctx.strokeStyle = "#9775fa"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(x, y, r + 5 + Math.sin(this._mt * 14) * 2, 0, Math.PI * 2); ctx.stroke();
+    this.drawCarrierSpawnRing(ctx);
+    this.drawRoleAura(ctx);
+    this.drawEliteMark(ctx);
+  }
+  drawRoleAura(ctx) {
+    if (this.y <= 0) return;
+    const x = this.x, y = this.y, r = this.radius;
+    if (this.type === "shieldCarrier" && this.eliteShield > 0 && !this.eliteCfg) {
+      const rr = r + 8 + Math.sin(this._mt * 8) * 2;
+      ctx.save(); ctx.globalAlpha = 0.35; ctx.strokeStyle = this.color; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 0.9; ctx.fillStyle = this.color; ctx.font = "bold 10px 'Segoe UI', sans-serif"; ctx.textAlign = "center"; ctx.fillText("护盾", x, y - r - 10);
+      UI.bar(ctx, x - r, y + r + 7, r * 2, 4, clamp(this.eliteShield / Math.max(1, this.eliteShieldMax || this.cfg.shield), 0, 1), this.color, this.color, {});
+      ctx.restore();
+    } else if (this.type === "jammer") {
+      const rr = Math.min(this.cfg.jamRadius || 0, 130), a = 0.18 + Math.abs(Math.sin(this._mt * 6)) * 0.12;
+      ctx.save(); ctx.globalAlpha = a; ctx.strokeStyle = this.color; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 0.85; ctx.fillStyle = this.color; ctx.font = "bold 10px 'Segoe UI', sans-serif"; ctx.textAlign = "center"; ctx.fillText("干扰", x, y - r - 10);
+      ctx.restore();
+    } else if (this.type === "support") {
+      const rr = this.cfg.repairRadius || 120, a = this._supportPulse > 0 ? 0.32 : 0.1;
+      ctx.save(); ctx.globalAlpha = a; ctx.strokeStyle = this.color; ctx.lineWidth = this._supportPulse > 0 ? 3 : 1.5;
+      ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 0.85; ctx.fillStyle = this.color; ctx.font = "bold 10px 'Segoe UI', sans-serif"; ctx.textAlign = "center"; ctx.fillText("修复", x, y - r - 10);
+      ctx.restore();
+    } else if (this.type === "sniper" && this._sniperWarn > 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.25 + 0.35 * Math.sin(this._mt * 30) ** 2;
+      ctx.strokeStyle = this.color; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(this._sniperAim) * 900, y + Math.sin(this._sniperAim) * 900); ctx.stroke();
       ctx.restore();
     }
+  }
+  drawCarrierSpawnRing(ctx) {
+    if (this._carrierSpawn <= 0) return;
+    const x = this.x, y = this.y, r = this.radius;
+    ctx.save(); ctx.globalAlpha = clamp(this._carrierSpawn, 0, 1) * 0.8;
+    ctx.strokeStyle = "#9775fa"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, r + 5 + Math.sin(this._mt * 14) * 2, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+  drawEliteMark(ctx) {
+    if (!this.eliteCfg) return;
+    const x = this.x, y = this.y, r = this.radius, c = this.eliteCfg.color;
+    ctx.save();
+    ctx.globalAlpha = 0.78 + Math.sin(this._mt * 8) * 0.12;
+    ctx.strokeStyle = c; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, r + 6, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = c; ctx.font = "bold 10px 'Segoe UI', sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(this.eliteCfg.name, x, y - r - 10);
+    if (this.eliteShield > 0) {
+      UI.bar(ctx, x - r, y + r + 7, r * 2, 4, clamp(this.eliteShield / Math.max(1, this.eliteShieldMax || this.eliteCfg.shield), 0, 1), c, c, {});
+    }
+    if (this._eliteWarn > 0 && game.player) {
+      ctx.globalAlpha = 0.35 + 0.35 * Math.sin(this._mt * 26) ** 2;
+      ctx.strokeStyle = c; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(game.player.x, game.player.y); ctx.stroke();
+    }
+    if (this.eliteCfg.jamRadius) {
+      ctx.globalAlpha = 0.10 + 0.06 * Math.sin(this._mt * 6) ** 2;
+      ctx.strokeStyle = c; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(x, y, this.eliteCfg.jamRadius, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
   }
 }
 
@@ -413,7 +623,8 @@ function runBossAttack(b, atk) {
 
 // Y:BOSS 造型剪影(供 Boss.draw 与首页图鉴共用)
 // QQ:纯色改渐变(受光面亮/边缘暗),给BOSS舰体加立体感;供 Boss.draw 与首页图鉴共用
-function fillBossShape(ctx, x, y, r, shape, color) {
+function fillBossShape(ctx, x, y, r, shape, color, assetIndex) {
+  if (assetIndex != null && ImageAssets.draw(ctx, ImageAssets.boss(assetIndex), x, y, r * 2.45)) return;
   const grad = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.15, x, y, r);
   grad.addColorStop(0, UI.shade(color, 0.35)); grad.addColorStop(1, UI.shade(color, -0.3));
   ctx.fillStyle = grad;
@@ -437,7 +648,7 @@ class Boss {
     this._fireScale = game.activeDiff.fireMult;              // 难度射速
     this.dead = false; this._t = 0; this._moveT = 0; this._entered = false; this._flash = 0;
     this._fireTimer = 1.2; this._spiral = 0; this._targetX = this.x;
-    this._enraged = false; this._laserCd = 0;   // Y:狂暴阶段 / 镭射独立冷却
+    this._enraged = false; this._laserCd = 0; this._lastPhaseIndex = 0;   // Y:狂暴阶段 / 镭射独立冷却
     this.defIndex = defIndex % CONFIG.bosses.length;   // W2:记下具体是哪个BOSS,给"击败特定BOSS"成就用
   }
   get phaseIndex() { const r = this.hp / this.maxHp, ph = this.def.phases; for (let i = 0; i < ph.length; i++) if (r > ph[i].until) return i; return ph.length - 1; }
@@ -448,16 +659,19 @@ class Boss {
     else if (def.movement === "figure8") { this.x = cx + Math.sin(this._t * def.moveSpeed) * def.moveRange; this.y = def.enterY + Math.sin(this._t * def.moveSpeed * 2) * 40; }
     else if (def.movement === "dart") {
       this.x += (this._targetX - this.x) * 0.06;
-      if (this._moveT > (def.dartEvery || 2)) { this._moveT = 0; const m = def.radius + 40; this._targetX = m + Math.random() * (CONFIG.WIDTH - 2 * m); }
+      if (this._moveT > (def.dartEvery || 2)) { this._moveT = 0; const m = def.radius + 40; this._targetX = m + game.rng() * (CONFIG.WIDTH - 2 * m); }
     }
   }
   update(dt) {
     const def = this.def;
     if (!this._entered) { this.y += 90 * dt; if (this.y >= def.enterY) { this.y = def.enterY; this._entered = true; } return; }
-    this._t += dt; this._moveT += dt; if (this._flash > 0) this._flash -= dt; if (this._laserCd > 0) this._laserCd -= dt; this.move(dt);
+    this._t += dt; this._moveT += dt; if (this._flash > 0) this._flash -= dt; if (this._laserCd > 0) this._laserCd -= dt; if (this._weakTimer > 0) this._weakTimer = Math.max(0, this._weakTimer - dt); this.move(dt);
+    const phaseIndex = this.phaseIndex;
+    if (phaseIndex !== this._lastPhaseIndex) { this._lastPhaseIndex = phaseIndex; game.onBossPhaseChange(this, phaseIndex); }
     // Y:血量 <=20% 时触发一次狂暴,此后攻击频率永久提升
     if (!this._enraged && this.hp / this.maxHp <= 0.2) { this._enraged = true; this._fireScale *= 0.7; game.onBossEnrage(this); }
-    const phase = def.phases[this.phaseIndex];
+    if (this.affix) game.updateBossAffix(this, dt);
+    const phase = def.phases[phaseIndex];
     this._fireTimer -= dt;
     if (this._fireTimer <= 0) { this._fireTimer = phase.cd * this._fireScale; for (const atk of phase.attacks) runBossAttack(this, atk); }
   }
@@ -466,6 +680,8 @@ class Boss {
     const flash = this._flash > 0, color = flash ? "#fff" : this.def.colors[this.phaseIndex], r = this.radius, x = this.x, y = this.y;
     // Y:狂暴态外圈红色脉动光晕
     if (this._enraged) { const gr = r + 14 + Math.sin(this._t * 6) * 4; ctx.fillStyle = "rgba(255,40,40,.22)"; ctx.beginPath(); ctx.arc(x, y, gr, 0, Math.PI * 2); ctx.fill(); }
+    if (this.affix && !flash) { ctx.strokeStyle = UI.rgba(this.affix.color, .72); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 20 + Math.sin(this._t * 5) * 3, 0, Math.PI * 2); ctx.stroke(); }
+    if (!flash && ImageAssets.draw(ctx, ImageAssets.boss(this.defIndex), x, y, r * 2.45)) return;
     // 侧翼炮塔
     ctx.fillStyle = "#2b3038"; ctx.fillRect(x - r - 7, y - 8, 12, 26); ctx.fillRect(x + r - 5, y - 8, 12, 26);
     ctx.fillStyle = "#495057"; ctx.fillRect(x - r - 3, y + 16, 4, 8); ctx.fillRect(x + r - 1, y + 16, 4, 8);
@@ -481,18 +697,42 @@ class Boss {
     ctx.save(); ctx.shadowColor = flash ? "#fff" : coreCol; ctx.shadowBlur = 16;
     ctx.fillStyle = flash ? "#fff" : "#ffe3e3"; ctx.beginPath(); ctx.arc(x, y - 6, pr, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = coreCol; ctx.beginPath(); ctx.arc(x, y - 6, pr * 0.5, 0, Math.PI * 2); ctx.fill();
+    if (this._weakTimer > 0) { ctx.strokeStyle = "#ffd43b"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y - 6, pr + 9, 0, Math.PI * 2); ctx.stroke(); }
     ctx.restore();
   }
 }
 
 class PowerUp {
-  constructor(x, y, kind) { this.x = x; this.y = y; this.kind = kind; this.radius = CONFIG.powerup.radius; this.dead = false; }
-  update(dt) { this.y += CONFIG.powerup.speed * dt; if (this.y > CONFIG.HEIGHT + this.radius) this.dead = true; }
+  constructor(x, y, kind) { this.x = x; this.y = y; this.kind = kind; this.radius = CONFIG.powerup.radius; this.dead = false; this._magnet = false; this._magnetRatio = 0; }
+  update(dt) {
+    this.y += CONFIG.powerup.speed * dt; this._magnet = false; this._magnetRatio = 0;
+    if (game.player) {
+      const dx = game.player.x - this.x, dy = game.player.y - this.y, d = Math.hypot(dx, dy), mr = CONFIG.powerup.magnetRadius * game.pickupRangeMult();
+      if (d > 1 && d < mr) {
+        const pull = 1 - d / mr;
+        const step = Math.min(d, CONFIG.powerup.magnetSpeed * (0.28 + pull) * dt);
+        this.x += dx / d * step; this.y += dy / d * step; this._magnet = true;
+        this._magnetRatio = pull;
+      }
+    }
+    if (this.y > CONFIG.HEIGHT + this.radius) this.dead = true;
+  }
   draw(ctx) {
     const x = this.x, y = this.y, r = this.radius;
-    const bg = { heal: "#e03131", power: "#2f9e44", bomb: "#5f3dc4", wing: "#495057" }[this.kind];
+    const bg = { heal: "#e03131", power: "#2f9e44", bomb: "#5f3dc4", wing: "#495057", chip: "#4dabf7" }[this.kind] || "#adb5bd";
     const pulse = 0.78 + Math.sin(game.titleT * 6 + x * 0.03) * 0.12;
     ctx.save();
+    if (this._magnet) {
+      if (game.player) {
+        ctx.globalAlpha = 0.18 + this._magnetRatio * 0.32;
+        ctx.strokeStyle = bg; ctx.lineWidth = 2.2; ctx.setLineDash([6, 5]);
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(game.player.x, game.player.y); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.globalAlpha = 0.38 + this._magnetRatio * 0.32; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, r + 7 + pulse * 3, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     ctx.shadowColor = bg; ctx.shadowBlur = 12 * pulse;
     const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.35, 2, x, y, r * 1.4);
     g.addColorStop(0, UI.shade(bg, 0.55)); g.addColorStop(0.65, bg); g.addColorStop(1, UI.shade(bg, -0.45));
@@ -505,6 +745,11 @@ class PowerUp {
       ctx.fillRect(x - 3, y - 8, 6, 16); ctx.fillRect(x - 8, y - 3, 16, 6);
     } else if (this.kind === "power") {   // 火力:白色双上箭头
       for (let k = 0; k < 2; k++) { const oy = k * 8 - 4; ctx.beginPath(); ctx.moveTo(x, y + oy - 4); ctx.lineTo(x - 7, y + oy + 4); ctx.lineTo(x + 7, y + oy + 4); ctx.closePath(); ctx.fill(); }
+    } else if (this.kind === "chip") {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(Math.PI / 4); ctx.fillRect(-7, -7, 14, 14); ctx.restore();
+      ctx.fillStyle = "#4dabf7"; ctx.fillRect(x - 3, y - 3, 6, 6);
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.6;
+      for (const [dx, dy] of [[0, -11], [11, 0], [0, 11], [-11, 0]]) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + dx, y + dy); ctx.stroke(); }
     } else if (this.kind === "bomb") {     // 炸弹:圆弹体 + 引线 + 火星
       ctx.beginPath(); ctx.arc(x, y + 2, 7, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x + 4, y - 4); ctx.lineTo(x + 8, y - 9); ctx.stroke();
