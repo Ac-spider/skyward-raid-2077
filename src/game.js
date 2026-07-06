@@ -770,6 +770,10 @@ const game = {
     for (const kind of ["reroll", "skip"]) { const r = this.chipActionRect(kind); if (px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h) return kind; }
     return "";
   },
+  isHpDraftCard(id) {
+    const card = this.cardInfo(id), b = card && card.type === "bonus" ? CONFIG.bonuses[card.key] : null;
+    return !!(b && (b.hp || b.hpPct || b.heal || b.healPct));
+  },
   drawChipChoices(exclude = []) {
     const skip = new Set(exclude);
     const pool = CONFIG.chipOrder.map(k => "chip:" + k).concat(CONFIG.bonusOrder.map(k => "bonus:" + k)).filter(id => !skip.has(id) && this.canDraftCard(id));
@@ -787,8 +791,8 @@ const game = {
     if (biased.length) takeWeighted(biased);
     const bonusPool = pool.filter(id => id.startsWith("bonus:"));
     if (!this._chipChoices.some(id => id.startsWith("bonus:")) && bonusPool.length) takeWeighted(bonusPool);
-    const survivalPool = pool.filter(id => id.startsWith("bonus:") && this.draftCardRoute(this.cardInfo(id)) === "生存");
-    if (!hasBonusRoute("生存") && survivalPool.length) takeWeighted(survivalPool);
+    const hpPool = pool.filter(id => this.isHpDraftCard(id));
+    if (!this._chipChoices.some(id => this.isHpDraftCard(id)) && hpPool.length) takeWeighted(hpPool);
     const top = this.buildRouteSummary().top, routePool = top.score >= 3 ? pool.filter(id => this.draftCardRoute(this.cardInfo(id)) === top.name) : [];
     if (this._chipChoices.length < 3 && top.score >= 3 && !hasBonusRoute(top.name) && routePool.length) takeWeighted(routePool);
     while (this._chipChoices.length < 3 && pool.length && takeWeighted(pool)) {}
