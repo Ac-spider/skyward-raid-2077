@@ -204,7 +204,7 @@ const game = {
     const pool = base.filter(e => e.key !== currentKey);
     const fresh = pool.filter(e => !recent.includes(e.key));
     const e = this.pick(fresh.length ? fresh : (pool.length ? pool : base));
-    this._endlessEvent = e; this._endlessEventTimer = CONFIG.endless.eventDuration; this._endlessEventT = CONFIG.endless.eventInterval; this._endlessHazardT = e.laserEvery ? (e.laserDelay || 1) : 0; this._endlessEventStartHits = this._endlessStats ? this._endlessStats.hits : 0;
+    this._endlessEvent = e; this._endlessEventTimer = CONFIG.endless.eventDuration; this._endlessEventT = CONFIG.endless.eventInterval; this._endlessHazardT = e.laserEvery ? (e.laserDelay || 1) : 0; this._endlessEventStartHits = this._endlessStats ? this._endlessStats.hits : 0; this._endlessEventStartKills = this._endlessStats ? (this._endlessStats.kills || 0) : 0;
     this._endlessEventsSeen.push(e.name || e.key);
     this._endlessRecentEvents = [e.key].concat(recent.filter(k => k !== e.key)).slice(0, 2);
     if (this._endlessStats) this._endlessStats.events++;
@@ -222,6 +222,8 @@ const game = {
   },
   finishEndlessEvent(e) {
     if (!e || !this.player) return 0;
+    const kills = this._endlessStats ? (this._endlessStats.kills || 0) - (this._endlessEventStartKills || 0) : 0;
+    if (e.killGoal && kills < e.killGoal) { this.floats.push(new FloatText(this.player.x, this.player.y - 78, "目标未达成 " + kills + "/" + e.killGoal, e.color || "#adb5bd")); return 0; }
     const cfg = CONFIG.endless, clean = this._endlessStats && this._endlessStats.hits === this._endlessEventStartHits;
     const gain = Math.round((cfg.eventClearScore || 0) * (clean ? 1.5 : 1) * this.threatScoreMult());
     if (this._endlessStats) { this._endlessStats.eventClears = (this._endlessStats.eventClears || 0) + 1; this._endlessStats.eventScore = (this._endlessStats.eventScore || 0) + gain; if (clean) this._endlessStats.cleanEvents = (this._endlessStats.cleanEvents || 0) + 1; }
@@ -2725,6 +2727,7 @@ const game = {
     if (!e) return "";
     const parts = [e.sub || ""].filter(Boolean);
     const pct = v => Math.round(v * 100) + "%";
+    if (e.killGoal) parts.push("目标击杀" + e.killGoal);
     if (e.scoreBonus) parts.push("分+" + pct(e.scoreBonus));
     if (e.threatGainMult && e.threatGainMult > 1) parts.push("威胁+" + pct(e.threatGainMult - 1));
     if (e.enemyHpMult) parts.push("敌血+" + pct(e.enemyHpMult));

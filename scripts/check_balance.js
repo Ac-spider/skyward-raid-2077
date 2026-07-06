@@ -80,6 +80,7 @@ assert(eventKeys.includes("repairConvoy"), "endless events should include repair
 assert(eventKeys.includes("shieldWall"), "endless events should include shield carrier pressure");
 assert(eventKeys.includes("phantomWing"), "endless events should include phantom pressure");
 assert(eventKeys.includes("carrierRaid"), "endless events should include carrier split pressure");
+assert(eventKeys.includes("annihilationOrder"), "endless events should include a kill-goal objective");
 const routeNames = new Set(["主炮", "激光", "追踪", "导弹", "生存", "风险"]);
 const drops = new Set(["power", "heal", "bomb", "wing", "chip"]);
 for (const e of CONFIG.endless.events) {
@@ -89,6 +90,7 @@ for (const e of CONFIG.endless.events) {
   if (e.enemyType) assert(enemyKeys.has(e.enemyType), `event ${e.key} references missing enemy ${e.enemyType}`);
   if (e.enemyChance != null) between(e.enemyChance, 0, 0.75, `event ${e.key} enemyChance`);
   if (e.spawnBonus != null) between(e.spawnBonus, 0, 3, `event ${e.key} spawnBonus`);
+  if (e.killGoal != null) between(e.killGoal, 6, 30, `event ${e.key} killGoal`);
   if (e.scoreBonus != null) between(e.scoreBonus, 0, 0.35, `event ${e.key} scoreBonus`);
   if (e.threatGainMult != null) between(e.threatGainMult, 1, 1.5, `event ${e.key} threatGainMult`);
   if (e.forceDrop) assert(drops.has(e.forceDrop), `event ${e.key} has invalid forceDrop ${e.forceDrop}`);
@@ -130,7 +132,16 @@ assert.strictEqual(game._bonusRerolls, 0, "hit event clear should not grant bonu
 assert.strictEqual(game._endlessStats.eventClears, 1, "event clear should be tracked");
 assert.strictEqual(game._endlessStats.cleanEvents || 0, 0, "hit event clear should not count as clean");
 assert.strictEqual(game._endlessStats.eventScore, eventHitGain, "event score should be tracked");
-game.score = 0; game.floats = []; game._endlessStats = { hits: 1 }; game._endlessEventStartHits = 1;
+const killGoalEvent = CONFIG.endless.events.find(e => e.key === "annihilationOrder");
+game.score = 0; game.floats = []; game._endlessStats = { hits: 0, kills: 3, eventClears: 0, eventScore: 0 }; game._endlessEventStartHits = 0; game._endlessEventStartKills = 0;
+assert.strictEqual(game.finishEndlessEvent(killGoalEvent), 0, "kill-goal event should fail without enough kills");
+assert.strictEqual(game._endlessStats.eventClears, 0, "failed kill-goal event should not count as cleared");
+assert(game.floats.some(f => f.text.includes("目标未达成")), "failed kill-goal event should show feedback");
+game.score = 0; game.floats = []; game._endlessStats = { hits: 0, kills: killGoalEvent.killGoal, eventClears: 0, eventScore: 0 }; game._endlessEventStartHits = 0; game._endlessEventStartKills = 0;
+assert(game.finishEndlessEvent(killGoalEvent) > 0, "kill-goal event should clear after enough kills");
+assert.strictEqual(game._endlessStats.eventClears, 1, "cleared kill-goal event should count as cleared");
+assert(game.endlessEventHUDDetail(killGoalEvent).includes("目标击杀"), "kill-goal event HUD should show objective");
+game.score = 0; game.floats = []; game._bonusRerolls = 0; game._endlessStats = { hits: 1 }; game._endlessEventStartHits = 1;
 const eventCleanGain = game.finishEndlessEvent(CONFIG.endless.events[0]);
 assert(eventCleanGain > eventHitGain, "clean event clear should grant bonus score");
 assert(game.player.shieldHp >= CONFIG.endless.eventCleanShield, "clean event clear should grant shield");
