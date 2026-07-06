@@ -739,6 +739,9 @@ const game = {
   draftBossText(card) {
     return this.isBossCounterCard(card) ? "Boss对策" : "";
   },
+  draftShieldText(card) {
+    return this.isShieldCounterCard(card) ? "破盾对策" : "";
+  },
   draftCardRoute(card) {
     return !card ? "" : card.type === "chip" ? this.chipRouteName(card.key) : ((this.routePreviewInfo(card) || {}).top || {}).name || "";
   },
@@ -772,6 +775,7 @@ const game = {
     const eventBias = this.activeEventRouteBias();
     if (eventBias && this.draftCardRoute(card) === eventBias) w *= 1.55;
     if (this.isBossCounterCard(card)) w *= 1.45;
+    if (this.isShieldCounterCard(card)) w *= 1.75;
     return w;
   },
   chipChoiceRect(i) { return { x: 40, y: 238 + i * 104, w: CONFIG.WIDTH - 80, h: 92 }; },
@@ -790,6 +794,13 @@ const game = {
   },
   isBossCounterCard(card) {
     return !!(this.boss && !this.boss.dead && card && card.type === "bonus" && ["bossHunter", "weakScanner", "executioner", "damage", "glassCannon", "vitalReactor"].includes(card.key));
+  },
+  hasShieldPressure() {
+    const e = this.activeEndlessEvent(), a = this.boss && !this.boss.dead ? this.boss.affix : null;
+    return !!((e && e.enemyType === "shieldCarrier") || (a && (a.key === "shieldEscort" || a.enemy === "shieldCarrier")));
+  },
+  isShieldCounterCard(card) {
+    return !!(this.hasShieldPressure() && card && card.type === "bonus" && card.key === "shieldBreaker");
   },
   drawChipChoices(exclude = []) {
     const skip = new Set(exclude);
@@ -810,6 +821,8 @@ const game = {
     if (!this._chipChoices.some(id => id.startsWith("bonus:")) && bonusPool.length) takeWeighted(bonusPool);
     const hpPool = pool.filter(id => this.isHpDraftCard(id));
     if (!this._chipChoices.some(id => this.isHpDraftCard(id)) && hpPool.length) takeWeighted(hpPool);
+    const shieldPool = this.hasShieldPressure() ? pool.filter(id => id === "bonus:shieldBreaker") : [];
+    if (this._chipChoices.length < 3 && shieldPool.length && !this._chipChoices.includes("bonus:shieldBreaker")) takeWeighted(shieldPool);
     const top = this.buildRouteSummary().top, routePool = top.score >= 3 ? pool.filter(id => this.draftCardRoute(this.cardInfo(id)) === top.name) : [];
     if (this._chipChoices.length < 3 && top.score >= 3 && !hasBonusRoute(top.name) && routePool.length) takeWeighted(routePool);
     while (this._chipChoices.length < 3 && pool.length && takeWeighted(pool)) {}
@@ -1773,7 +1786,7 @@ const game = {
       this.drawChipCardIcon(ctx, card, r.x + 48, r.y + r.h / 2, 27);
       this.drawRarityBadge(ctx, r.x + r.w - 18, r.y + 28, card.rarity, rarityColor);
       ctx.textAlign = "left";
-      const tags = [this.draftEventBiasText(card), this.draftFocusText(card), this.draftBossText(card)].filter(Boolean).join(" · ");
+      const tags = [this.draftEventBiasText(card), this.draftFocusText(card), this.draftBossText(card), this.draftShieldText(card)].filter(Boolean).join(" · ");
       ctx.fillStyle = rarityColor; ctx.font = "bold 13px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + " · " + (card.type === "chip" ? "限时技能" : "永久 BONUS") + " · " + this.draftProgressText(card) + (tags ? " · " + tags : ""), r.x + 88, r.y + 25);
       ctx.fillStyle = "#fff"; ctx.font = "bold 23px 'Segoe UI', sans-serif"; ctx.fillText(card.name, r.x + 88, r.y + 51);
       ctx.fillStyle = "#ced4da"; ctx.font = "14px 'Segoe UI', sans-serif";
