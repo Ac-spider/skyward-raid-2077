@@ -155,7 +155,7 @@ assert(game.boss._weakTimer > exposedCore.dur, "weakScanner should extend weak w
 
 const bonusKeys = new Set(Object.keys(CONFIG.bonuses));
 for (const key of CONFIG.bonusOrder) assert(bonusKeys.has(key), `bonusOrder references missing bonus ${key}`);
-for (const key of ["maxHp", "reinforcedHull", "armorPlating", "fieldRepair", "leech", "livingArmor", "painConverter", "armorCaliber", "vitalReactor", "shieldAmplifier", "signalFilter"]) {
+for (const key of ["maxHp", "reinforcedHull", "armorPlating", "fieldRepair", "repairLoop", "leech", "livingArmor", "painConverter", "armorCaliber", "vitalReactor", "shieldAmplifier", "signalFilter"]) {
   assert(bonusKeys.has(key), `missing survival/build bonus ${key}`);
 }
 assert(CONFIG.bonuses.armorCaliber.hpPerDamage > 0, "armorCaliber hpPerDamage must be positive");
@@ -165,6 +165,9 @@ between(CONFIG.bonuses.vitalReactor.damageMult, 0.02, 0.08, "vitalReactor damage
 between(CONFIG.bonuses.vitalReactor.maxDamageMult, 0.1, 0.4, "vitalReactor maxDamageMult");
 between(CONFIG.bonuses.shieldAmplifier.damageMult, 0.08, 0.3, "shieldAmplifier damageMult");
 between(CONFIG.bonuses.signalFilter.jamResist, 0.08, 0.3, "signalFilter jamResist");
+between(CONFIG.bonuses.repairLoop.every, 8, 22, "repairLoop interval");
+between(CONFIG.bonuses.repairLoop.healPct, 0.03, 0.12, "repairLoop healPct");
+between(CONFIG.bonuses.repairLoop.shield, 4, 16, "repairLoop shield");
 assert(bonusKeys.has("weakScanner"), "missing weak window build bonus");
 between(CONFIG.bonuses.weakScanner.weakDamageMult, 0.1, 0.5, "weakScanner weakDamageMult");
 between(CONFIG.bonuses.weakScanner.weakDuration, 0.2, 1.2, "weakScanner weakDuration");
@@ -186,6 +189,15 @@ assert(game.player.maxHp > 100 && game._bonusHpGain.livingArmor > 0, "livingArmo
 game._bonusHpGain.livingArmor = CONFIG.bonuses.livingArmor.maxHp;
 game._bonusKillN += CONFIG.bonuses.livingArmor.every;
 assert.strictEqual(game.triggerLivingArmorGrowth(), 0, "livingArmor should respect max HP cap");
+const repairLoop = CONFIG.bonuses.repairLoop;
+game.bonuses = { repairLoop: 1 }; game.chips = {}; game.combo = 0; game.threat = 0; game._maxThreatLevel = 0; game._noHitT = 0; game._fieldRepairT = 0; game._repairLoopT = repairLoop.every - 0.01; game.floats = [];
+game.player = { x: 100, y: 100, hp: 70, maxHp: 100, power: 1, overcharge: 0, shieldHp: 0, heal(n) { this.hp = Math.min(this.maxHp, this.hp + n); }, grantShield(n, dur) { this.shieldHp = n; this.shieldTimer = dur; } };
+game.updateDepthSystems(0.02);
+assert(game.player.hp > 70, "repairLoop should heal on interval");
+game._repairLoopT = repairLoop.every; game.player.hp = game.player.maxHp; game.player.shieldHp = 0;
+game.updateDepthSystems(0);
+assert(game.player.shieldHp > 0, "repairLoop should grant shield at full HP");
+assert(game.draftStatPreviewText(game.cardInfo("bonus:repairLoop")).includes("%"), "repairLoop draft preview should show healing");
 game.bonuses = { shieldAmplifier: 1 }; game.chips = {}; game.player = { hp: 100, maxHp: 100, baseMaxHp: 100, shieldHp: 0 };
 assert.strictEqual(game.playerDamage(100), 100, "shieldAmplifier should not add damage without shield");
 game.player.shieldHp = 10;
