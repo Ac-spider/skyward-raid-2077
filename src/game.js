@@ -177,8 +177,8 @@ const game = {
     director.begin(null);
     input.targetX = CONFIG.player.startX; input.targetY = CONFIG.player.startY;
     Sound.start(); Music.play();
-    // GG:无尽挑战(非经典无尽关卡)开局连续3次强化卡自选,先攒出起步build再正式生存;经典无尽关卡沿用老版本节奏,没有这个阶段
-    this._startingDrafts = this.endlessLite ? 0 : 3;
+    // GG:无尽挑战(非经典无尽关卡)开局按配置连续强化自选,先攒出起步build再正式生存;经典无尽关卡沿用老版本节奏,没有这个阶段
+    this._startingDrafts = this.endlessLite ? 0 : (CONFIG.endless.startingDrafts || 3);
     if (this._startingDrafts > 0) { this._inStartingDraft = true; this.beginStartingDraft(); }
     else { this._inStartingDraft = false; const b = this.endlessBannerText(); this.banner(b.text, b.sub); }
     Achievements.trackShipUse(this.ship.key);   // OO
@@ -187,8 +187,9 @@ const game = {
     return { text: this.endlessLite ? "无尽关卡" : (this.challengeMode ? "挑战模式" : "无尽挑战"), sub: this.challengeDaily ? "每日空域" : (this.challengeMode ? "同种子竞速" : "") };
   },
   beginStartingDraft() {
+    const total = CONFIG.endless.startingDrafts || 3;
     this._startingDrafts--;
-    this.beginChipDraft("开局强化 · 第" + (3 - this._startingDrafts) + "/3件");
+    this.beginChipDraft("开局强化 · 第" + (total - this._startingDrafts) + "/" + total + "件");
   },
   // GG:一轮抽卡结束后的收尾 —— 开局连抽阶段没抽完就接着抽下一轮,抽完(或本来就不是开局连抽)才真正回到 playing
   resumeAfterDraft() {
@@ -307,7 +308,7 @@ const game = {
       const count = event.type === "ambush" ? Math.min(2 + event.points, 5) : 1;
       for (let i = 0; i < count && this.enemies.length < CONFIG.endless.maxEnemies; i++) {
         const r = CONFIG.enemy[type].radius, x = r + 20 + this.rng() * (CONFIG.WIDTH - 2 * (r + 20));
-        this.enemies.push(pools.enemy.get(type, x, i * 18, this.pick(CONFIG.endless.moves || ["sine", "zigzag", "dive", "straight"]), elite));
+        this.enemies.push(pools.enemy.get(type, x, i * 18, CONFIG.enemy[type].move || this.pick(CONFIG.endless.moves || ["sine", "zigzag", "dive", "straight"]), elite));
       }
     }
     Sound.tone(520, 0.12, "sawtooth", 0.12, 180);
@@ -334,7 +335,7 @@ const game = {
         const eventType = this.endlessEventValue("enemyType", null), eventChance = this.endlessEventValue("enemyChance", 0);
         const type = eventType && CONFIG.enemy[eventType] && this.rng() < eventChance ? eventType : (this.rng() < this.endlessEventValue("jammerChance", 0) ? "jammer" : this.pick(pool)), r = CONFIG.enemy[type].radius;
         const elite = type !== "small" && this.rng() < this.endlessEventValue("eliteChance", 0) ? this.pick(CONFIG.elite.types || ["shield", "charger"]) : null;
-        this.enemies.push(pools.enemy.get(type, r + 20 + this.rng() * (CONFIG.WIDTH - 2 * (r + 20)), 0, this.pick(moves), elite));
+        this.enemies.push(pools.enemy.get(type, r + 20 + this.rng() * (CONFIG.WIDTH - 2 * (r + 20)), 0, CONFIG.enemy[type].move || this.pick(moves), elite));
       }
       if (this.rng() < CONFIG.endless.powerupChance + this.endlessEventValue("powerupChanceAdd", 0)) this.spawnPowerUp(30 + this.rng() * (CONFIG.WIDTH - 60), this.endlessEventValue("forceDrop", null) || this.chooseDrop());
     }
@@ -644,7 +645,7 @@ const game = {
   endlessEnemyHpMult() {
     if (!this.endless) return 1;
     const e = CONFIG.endless;
-    return (1 + Math.min(this._endlessT / e.enemyHpRampTime, 1) * (e.enemyHpRampMult - 1)) * (1 + this.endlessEventValue("enemyHpMult", 0));
+    return (e.enemyHpBaseMult || 1) * (1 + Math.min(this._endlessT / e.enemyHpRampTime, 1) * (e.enemyHpRampMult - 1)) * (1 + this.endlessEventValue("enemyHpMult", 0));
   },
   shipWeaponValue(prop, fallback) {
     const b = ((this.player && this.player.ship) || this.ship).weaponBias || {};
@@ -731,7 +732,7 @@ const game = {
     else if ((r.bossAffixes || []).length && !(tele.bossKills || 0)) tags.push("Boss压力高");
     if ((tele.eliteKills || 0) >= 8) tags.push("精英猎手");
     const hpGain = Object.values(r.bonusHpGain || {}).reduce((sum, n) => sum + (n || 0), 0);
-    if (hpGain >= 20) tags.push("血量构筑 +" + hpGain + "HP");
+    if (hpGain >= 18) tags.push("血量构筑 +" + hpGain + "HP");
     if (tele.eventFails) tags.push("目标失败 " + tele.eventFails);
     if (tele.cleanEvents) tags.push("完美空域 " + tele.cleanEvents);
     else if (tele.eventClears) tags.push("空域突破 " + tele.eventClears);
@@ -1294,11 +1295,11 @@ const game = {
     }
     return repaired;
   },
-  // W2:无尽模式 BOSS 血量按已刷出过的 BOSS 场次数递增(每场 +8%,封顶12场即+96%),让长线存活不会一直打同样血量的 BOSS 车轮战
+  // W2:无尽模式 BOSS 血量按已刷出过的 BOSS 场次数递增,让长线存活不会一直打同样血量的 BOSS 车轮战
   spawnBoss(defIndex) {
     const b = new Boss(defIndex);
     if (this.endless) {
-      const cfg = CONFIG.endless.boss, mult = 1 + Math.min(this._endlessBossN, cfg.hpStepMax) * cfg.hpStep;
+      const cfg = CONFIG.endless.boss, mult = (cfg.baseHpMult || 1) * (1 + Math.min(this._endlessBossN, cfg.hpStepMax) * cfg.hpStep);
       b.maxHp = Math.round(b.maxHp * mult); b.hp = b.maxHp;
       if (!this.endlessLite) this.applyEndlessBossAffix(b, this.pickEndlessBossAffix(cfg.affixes || []));   // GG:经典无尽没有词缀系统,普通BOSS车轮战
     }
@@ -1361,8 +1362,8 @@ const game = {
     for (let i = 0; i < count; i++) {
       const side = i % 2 ? 1 : -1, lane = Math.ceil((i + 1) / 2);
       const x = clamp(b.x + side * (b.radius + r + 18 + lane * 18), r + 16, CONFIG.WIDTH - r - 16);
-      const e = pools.enemy.get(type, x, 0, "swoop", a.elite || null);
-      e.y = Math.max(-r, b.y + b.radius * 0.25 - made * 14);
+      const e = pools.enemy.get(type, x, 0, CONFIG.enemy[type].move || "swoop", a.elite || null);
+      if (!CONFIG.enemy[type].fromBottom) e.y = Math.max(-r, b.y + b.radius * 0.25 - made * 14);
       this.enemies.push(e); made++;
       this.floats.push(new FloatText(e.x, e.y - e.radius, a.name + "僚机", a.color));
     }
@@ -1413,7 +1414,7 @@ const game = {
     }
   },
   // 所有敌弹的唯一出口:统一按难度缩放伤害
-  // W:无尽模式敌弹伤害随存活时间线性爬升,300 秒时封顶 3 倍(非无尽恒为 1)
+  // W:无尽模式敌弹伤害随存活时间线性爬升,具体封顶时间和倍率由 CONFIG.endless 控制(非无尽恒为 1)
   endlessBulletDmgMult() {
     if (!this.endless) return 1;
     const e = CONFIG.endless;
@@ -1748,7 +1749,7 @@ const game = {
         }
       }
     }
-    for (const e of this.enemies) { if (e.dead) continue; if (hit(e, this.player)) { if (!e.isBoss) { e.dead = true; this.burst(e.x, e.y, e.color, 10, 160); } this.player.takeDamage(CONFIG.crashDamage * this.activeDiff.dmgMult * this.threatDamageMult()); } }
+    for (const e of this.enemies) { if (e.dead) continue; if (hit(e, this.player)) { if (!e.isBoss) { e.dead = true; this.burst(e.x, e.y, e.color, 10, 160); } this.player.takeDamage(((e.cfg && e.cfg.crashDamage) || CONFIG.crashDamage) * this.activeDiff.dmgMult * this.threatDamageMult()); } }
     for (const b of this.enemyBullets) { if (b.dead) continue; if (hit(b, this.player)) { b.dead = true; this.player.takeDamage(b.damage); } }
     for (const p of this.powerups) {
       if (p.dead) continue;
