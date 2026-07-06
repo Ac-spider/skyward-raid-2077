@@ -12,6 +12,7 @@ vm.runInContext(fs.readFileSync("src/game.js", "utf8") + "\nglobalThis.game = ga
 const { CONFIG } = sandbox;
 const { game } = sandbox;
 sandbox.FloatText = class FloatText { constructor(x, y, text, color) { this.x = x; this.y = y; this.text = text; this.color = color; } };
+sandbox.pools = { enemy: { get(type, x, y, move, elite) { return { type, x, y, move, elite, dead: false, isBoss: false, radius: CONFIG.enemy[type].radius }; } } };
 
 const between = (value, min, max, label) => assert(value >= min && value <= max, `${label} ${value} outside ${min}-${max}`);
 const unique = (items, label) => assert.strictEqual(new Set(items).size, items.length, `${label} has duplicate keys`);
@@ -131,6 +132,7 @@ const affixes = CONFIG.endless.boss.affixes;
 unique(affixes.map(a => a.key), "boss affixes");
 assert(affixes.some(a => a.key === "ewar"), "boss affixes should include electronic warfare pressure");
 assert(affixes.some(a => a.key === "exposedCore"), "boss affixes should include weak point windows");
+assert(affixes.some(a => a.key === "phantomEscort"), "boss affixes should include phantom escort pressure");
 for (const a of affixes) {
   assert(a.name && a.desc, `boss affix ${a.key} needs readable text`);
   if (a.scoreMult) between(a.scoreMult, 1, 1.35, `boss affix ${a.key} scoreMult`);
@@ -157,6 +159,10 @@ assert(game.playerDamage(100, game.boss) > weakDamage, "weakScanner should incre
 game.floats = []; game.boss = { isBoss: true, x: 100, y: 100, radius: 40, hp: 100, maxHp: 100, affix: exposedCore, _weakTimer: 0 };
 game.openBossWeakPoint(game.boss, exposedCore);
 assert(game.boss._weakTimer > exposedCore.dur, "weakScanner should extend weak window duration");
+const phantomEscort = affixes.find(a => a.key === "phantomEscort");
+game.enemies = []; game.floats = []; game.boss = { x: 220, y: 120, radius: 50 };
+game.spawnBossEscort(game.boss, phantomEscort);
+assert(game.enemies.some(e => e.type === "phantom"), "phantomEscort should spawn phantom adds");
 
 const bonusKeys = new Set(Object.keys(CONFIG.bonuses));
 for (const key of CONFIG.bonusOrder) assert(bonusKeys.has(key), `bonusOrder references missing bonus ${key}`);
