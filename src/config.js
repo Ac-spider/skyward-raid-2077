@@ -84,7 +84,7 @@ const CONFIG = {
     8: [ { ox: 0, deg: 0 }, { ox: -7, deg: -6 }, { ox: 7, deg: 6 }, { ox: -13, deg: -13 }, { ox: 13, deg: 13 }, { ox: -19, deg: -22 }, { ox: 19, deg: 22 }, { ox: -25, deg: -32 }, { ox: 25, deg: 32 }, { ox: -31, deg: -42 }, { ox: 31, deg: 42 } ], // 11 路
   },
 
-  // weights 普通掉落;endlessWeights 无尽掉落(炸弹更稀有)。火力满级后继续吃 power 会进入超载层数。
+  // weights 普通掉落;endlessWeights 无尽掉落(炸弹更稀有)。火力满级后继续吃 power 会永久强化主炮/激光。
   // autoInterval:常规关卡(非无尽)每隔多久自动刷新一个道具(秒)。
   powerup: { radius: 14, speed: 130, dropChance: 0.11, healAmount: 12, autoInterval: 5, magnetRadius: 40, magnetSpeed: 640, chipMinPower: 5, chipMinEndlessTime: 30, chipDraftInterval: 30, chipBossDraftDelay: 30, chipMinDraftGap: 30,
     weights:        { power: 0.47, heal: 0.22, bomb: 0.12, wing: 0.14, chip: 0.05 },
@@ -387,7 +387,7 @@ const CONFIG = {
       ],
     },
   },
-  challenge: { rulesVersion: 86, splits: [30, 60, 120] },
+  challenge: { rulesVersion: 87, splits: [30, 60, 120] },
 
   combo: { timeout: 2.5, scoreStep: 0.15, maxMult: 5, resetOnHit: false },
 

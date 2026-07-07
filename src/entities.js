@@ -11,7 +11,7 @@ class Player {
     this.x = c.startX; this.y = c.startY; this.radius = c.radius * (ship.radiusMult || 1);
     this.maxHp = Math.round(c.maxHp * ship.hpMult * diff.playerHpMult); this.baseMaxHp = this.maxHp; this.hp = this.maxHp;
     this.fireInterval = c.fireInterval * ship.fireMult;
-    this.power = 1 + diff.startPower; this.overcharge = 0;
+    this.power = 1 + diff.startPower; this.overcharge = 0; this.powerDamage = 0; this.wingDamage = 0;
     this.bombs = clamp(game.activeDiff.startBombs + ship.bombs, 0, CONFIG.player.maxBombs);
     this.wings = clamp(ship.wings + diff.startWings, 0, CONFIG.wingMax);      // A:僚机数
     this.energy = 0;             // B:必杀能量 0-100
@@ -57,7 +57,7 @@ class Player {
       this._fireTimer = this.fireInterval * game.mainGunCooldownMult();
       const pattern = CONFIG.weapon[clamp(this.power, 1, c.maxPower)];
       for (const s of pattern) { const rad = s.deg * DEG; game.spawnPlayerBullet(this.x + s.ox, this.y - this.radius, Math.sin(rad) * c.bulletSpeed, -Math.cos(rad) * c.bulletSpeed); }
-      for (let i = 0; i < this.wings; i++) game.spawnPlayerBullet(this.x + wingOffsetX(i), this.y + 4, 0, -c.bulletSpeed);   // 僚机直射(任意数量排布)
+      for (let i = 0; i < this.wings; i++) game.spawnPlayerBullet(this.x + wingOffsetX(i), this.y + 4, 0, -c.bulletSpeed, "wing");   // 僚机直射(任意数量排布)
       const side = game.bonusStacks("sideCannons"), sideCfg = CONFIG.bonuses.sideCannons;
       for (let i = 1, n = Math.min(side, sideCfg.maxPairs); i <= n; i++) {
         const a = (sideCfg.angle + (i - 1) * 6) * DEG, ox = sideCfg.offset * i;
@@ -138,10 +138,10 @@ class Player {
   }
   addPower() {
     if (this.power < CONFIG.player.maxPower) this.power++;
-    else this.overcharge = clamp(this.overcharge + 1, 0, CONFIG.player.maxOvercharge);
+    else { this.overcharge = clamp(this.overcharge + 1, 0, CONFIG.player.maxOvercharge); this.powerDamage++; }
   }
   addBomb()    { this.bombs = clamp(this.bombs + 1, 0, CONFIG.player.maxBombs); }
-  addWing()    { this.wings = clamp(this.wings + 1, 0, CONFIG.wingMax); }
+  addWing()    { if (this.wings < CONFIG.wingMax) this.wings++; else this.wingDamage++; }
   addEnergy(n) { this.energy = clamp(this.energy + n * (this.ship.energyMult || 1), 0, 100); }
   heal(n)      { this.hp = clamp(this.hp + n, 0, this.maxHp); }
   applySlow(mult, dur) {
@@ -248,8 +248,8 @@ function drawShipBody(ctx, x, y, ship) {
 
 // DD:constructor 委托给 init(),配合下面的 Pool 复用实例(无尽模式长时间跑,减少高频 new 的 GC 压力)
 class PlayerBullet {
-  constructor(x, y, vx, vy) { this.init(x, y, vx, vy); }
-  init(x, y, vx, vy) { this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.radius = CONFIG.bullet.radius; this.pierce = game.bonusValue("pierce", "pierce"); this.hitEnemies = new Set(); this.dead = false; }
+  constructor(x, y, vx, vy, source = "main") { this.init(x, y, vx, vy, source); }
+  init(x, y, vx, vy, source = "main") { this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.source = source; this.radius = CONFIG.bullet.radius; this.pierce = game.bonusValue("pierce", "pierce"); this.hitEnemies = new Set(); this.dead = false; }
   update(dt) { this.x += this.vx * dt; this.y += this.vy * dt; if (this.y < -20 || this.x < -20 || this.x > CONFIG.WIDTH + 20) this.dead = true; }
   // QQ:纯色改渐变(弹头亮白、弹尾橙),做出"能量弹"质感;不用 shadowBlur(子弹多,省性能)
   draw(ctx) {
@@ -408,7 +408,7 @@ class PlayerLaser {
   init(x, y, overcharge = 0, damageMult = 1, widthMult = 1) {
     const s = CONFIG.secondary;
     this.x = x; this.y = y; this.overcharge = overcharge; this.width = s.laserWidth + overcharge * 3;
-    this.damage = s.laserDamage + Math.floor(overcharge / 2) + game.shipWeaponValue("laserDamageBonus", 0) + game.bonusValue("laserLens", "laserDamage") + game.laserDamageBonus(); this.life = (s.laserDuration + overcharge * 0.01 + game.bonusValue("laserLens", "laserDuration")) * game.rangeMult() * game.laserDurationMult();
+    this.damage = s.laserDamage + Math.floor(overcharge / 2) + ((game.player && game.player.powerDamage) || 0) + game.shipWeaponValue("laserDamageBonus", 0) + game.bonusValue("laserLens", "laserDamage") + game.laserDamageBonus(); this.life = (s.laserDuration + overcharge * 0.01 + game.bonusValue("laserLens", "laserDuration")) * game.rangeMult() * game.laserDurationMult();
     this.width *= Math.max(0.52, 1 - game.bonusValue("laserLens", "laserWidthShrink"));
     if (game.chipActive("laserFocus")) {
       const c = CONFIG.chips.laserFocus;

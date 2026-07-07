@@ -641,8 +641,9 @@ const game = {
     const b = CONFIG.bonuses.adrenaline, p = this.player;
     return b && p && p.maxHp && p.hp / p.maxHp <= b.threshold ? this.bonusStacks("adrenaline") * (b[prop] || 0) : 0;
   },
-  mainBulletDamage(target = null) {
-    let d = CONFIG.bullet.damage + this.bonusValue("kineticAmmo", "bulletDamage") + this.bonusValue("heavyRounds", "bulletDamage") + this.armorCaliberDamage() + this.routeBonus("主炮", 1);
+  mainBulletDamage(target = null, source = "main") {
+    const p = this.player;
+    let d = CONFIG.bullet.damage + this.bonusValue("kineticAmmo", "bulletDamage") + this.bonusValue("heavyRounds", "bulletDamage") + this.armorCaliberDamage() + this.routeBonus("主炮", 1) + (p ? (source === "wing" ? p.wingDamage || 0 : p.powerDamage || 0) : 0);
     if (this.mainBulletArmorPierces(target)) d *= 1 + this.bonusValue("armorPiercer", "heavyDamageMult");
     return d;
   },
@@ -1367,7 +1368,7 @@ const game = {
     this.dropThreat(blocked ? CONFIG.threat.blockedHitLoss : CONFIG.threat.hitLoss);
   },
 
-  spawnPlayerBullet(x, y, vx, vy) { this.playerBullets.push(pools.playerBullet.get(x, y, vx, vy)); },
+  spawnPlayerBullet(x, y, vx, vy, source = "main") { this.playerBullets.push(pools.playerBullet.get(x, y, vx, vy, source)); },
   spawnHomingShot(x, y, overcharge) { this.homingShots.push(pools.homingShot.get(x, y, overcharge)); },
   spawnMissile(x, y, overcharge) { this.missiles.push(pools.missile.get(x, y, overcharge)); },
   spawnPlayerLaser(x, y, overcharge, damageMult = 1, widthMult = 1) { this.playerLasers.push(pools.playerLaser.get(x, y, overcharge, damageMult, widthMult)); },
@@ -1877,21 +1878,9 @@ const game = {
   collectPowerup(kind) {
     const p = this.player, o = CONFIG.overflow;
     if (kind === "power") {
-      if (p.power >= CONFIG.player.maxPower && p.overcharge >= CONFIG.player.maxOvercharge) {
-        const b = this.queueOverflowReward("power", "#38d9a9", "火力满额");
-        if (b && b.count === 1) { if (this.endless) this.activateNextChip(); else this.claimChipReward(false); }
-        if (b) {
-          const energy = Math.min(o.energyCap || 60, Math.max(0, b.count - 1) * (o.extraEnergy || 0));
-          const delta = energy - (b.energy || 0);
-          if (delta > 0) p.addEnergy(delta);
-          b.energy = energy; b.detail = energy > 0 ? "+" + Math.round(energy) + "能量" : "芯片强化";
-        }
-      }
-      else {
-        const wasMax = p.power >= CONFIG.player.maxPower;
-        p.addPower();
-        this.floats.push(new FloatText(p.x, p.y - 34, wasMax ? "过载 +" + p.overcharge : "火力 +1", wasMax ? "#74c0fc" : "#38d9a9"));
-      }
+      const wasMax = p.power >= CONFIG.player.maxPower;
+      p.addPower();
+      this.floats.push(new FloatText(p.x, p.y - 34, wasMax ? "火力伤害 +" + (p.powerDamage || 0) : "火力 +1", wasMax ? "#74c0fc" : "#38d9a9"));
     } else if (kind === "chip") {
       const b = this.queueOverflowReward("chip", "#4dabf7", "芯片满额");
       if (b && b.count === 1) { if (this.endless) this.activateNextChip(); else this.claimChipReward(false); }
@@ -1914,17 +1903,9 @@ const game = {
       }
       else { p.addBomb(); this.floats.push(new FloatText(p.x, p.y - 34, "炸弹 +1", "#cc5de8")); }
     } else if (kind === "wing") {
-      if (p.wings >= CONFIG.wingMax) {
-        const b = this.queueOverflowReward("wing", "#dee2e6", "僚机满额");
-        if (b && b.count === 1 && !this.endless) this.activateChip(o.wingChip, "侧翼炮组");
-        if (b) {
-          const energy = this.endless ? Math.min(o.energyCap || 60, b.count * (o.extraEnergy || 0)) : 0;
-          const delta = energy - (b.energy || 0);
-          if (delta > 0) p.addEnergy(delta);
-          b.energy = energy; b.detail = energy > 0 ? "+" + Math.round(energy) + "能量" : "侧翼炮组";
-        }
-      }
-      else { p.addWing(); this.floats.push(new FloatText(p.x, p.y - 34, "僚机 +1", "#dee2e6")); }
+      const wasMax = p.wings >= CONFIG.wingMax;
+      p.addWing();
+      this.floats.push(new FloatText(p.x, p.y - 34, wasMax ? "僚机伤害 +" + (p.wingDamage || 0) : "僚机 +1", "#dee2e6"));
     } else {
       if (p.hp >= p.maxHp) {
         this.triggerMedicalReservoir();
@@ -2015,7 +1996,7 @@ const game = {
         if (!hit(b, e)) continue;
         b.hitEnemies.add(e); this.spawnHitSpark(b.x, b.y);
         if (this.mainBulletArmorPierces(e) && (!e._armorPierceFx || e._armorPierceFx <= 0)) { e._armorPierceFx = 0.35; this.floats.push(new FloatText(e.x, e.y - e.radius - 10, "破甲", CONFIG.bonuses.armorPiercer.color)); }
-        if (e.damage(this.playerDamage(this.mainBulletDamage(e), e), "bullet")) this.onEnemyKilled(e);
+        if (e.damage(this.playerDamage(this.mainBulletDamage(e, b.source), e), "bullet")) this.onEnemyKilled(e);
         if (b.pierce > 0) { b.pierce--; continue; }
         b.dead = true; break;
       }
