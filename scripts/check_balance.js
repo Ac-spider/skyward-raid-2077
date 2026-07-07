@@ -90,14 +90,17 @@ assert.strictEqual(CONFIG.endless.eventClearScore, 700, "event clear score shoul
 between(CONFIG.endless.eventCleanShield, 8, 50, "event clean shield");
 assert.strictEqual(CONFIG.endless.eventCleanShield, 18, "clean event shield should be toned down");
 between(CONFIG.endless.eventCleanShieldDur, 2, 10, "event clean shield duration");
-assert.strictEqual(CONFIG.chips.laserFocus.laserDamageBonus, 1, "laserFocus chip should be toned down");
-assert.strictEqual(CONFIG.chips.missileBarrage.damageBonus, 1, "missileBarrage chip should be toned down");
-assert.strictEqual(CONFIG.chips.chargeCore.boostBonus, 2, "chargeCore chip should be toned down");
+assert.strictEqual(CONFIG.chips.laserFocus.duration, 15, "laserFocus chip should last long enough to feel impactful");
+assert.strictEqual(CONFIG.chips.laserFocus.laserDamageBonus, 2, "laserFocus chip should provide visible laser growth");
+assert.strictEqual(CONFIG.chips.homingSwarm.damageBonus, 2, "homingSwarm chip should provide visible homing growth");
+assert.strictEqual(CONFIG.chips.missileBarrage.damageBonus, 2, "missileBarrage chip should provide visible missile growth");
+assert.strictEqual(CONFIG.chips.chargeCore.boostBonus, 4, "chargeCore chip should provide visible charge growth");
+assert.strictEqual(CONFIG.chips.capacitor.block, 24, "capacitor chip should provide visible defensive growth");
 assert.strictEqual(CONFIG.bonuses.damage.damageMult, 0.12, "damage bonus should be toned down");
 assert.strictEqual(CONFIG.bonuses.fireRate.cooldownMult, 0.08, "fireRate bonus should be toned down");
 assert.strictEqual(CONFIG.bonuses.perfectLine.damageMult, 0.10, "perfectLine damage should be toned down");
 assert.strictEqual(CONFIG.bonuses.bossHunter.bossDamageMult, 0.30, "bossHunter bonus should be toned down");
-const pickBuffCards = ["chip:chargeCore", "chip:capacitor", "bonus:maxHp", "bonus:livingArmor", "bonus:medicalReservoir", "bonus:repairLoop", "bonus:painConverter", "bonus:salvage", "bonus:shieldBreaker", "bonus:missileInterceptor", "bonus:magnetCore", "bonus:comboBattery", "bonus:lastStand", "bonus:emergencyBarrier"];
+const pickBuffCards = ["chip:laserFocus", "chip:homingSwarm", "chip:missileBarrage", "chip:chargeCore", "chip:capacitor", "chip:sideGuns", "chip:volatileCore", "bonus:maxHp", "bonus:livingArmor", "bonus:medicalReservoir", "bonus:repairLoop", "bonus:painConverter", "bonus:salvage", "bonus:shieldBreaker", "bonus:missileInterceptor", "bonus:magnetCore", "bonus:comboBattery", "bonus:lastStand", "bonus:emergencyBarrier"];
 assert(pickBuffCards.length >= 14, "draft pick buffs should cover more card routes");
 for (const id of pickBuffCards) {
   const card = game.cardInfo(id), buff = card && card.pickBuff;
