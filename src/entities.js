@@ -6,13 +6,14 @@
 class Player {
   constructor() {
     const c = CONFIG.player, ship = game.ship;
+    const diff = game.activeEndlessDiff();
     this.ship = ship;
     this.x = c.startX; this.y = c.startY; this.radius = c.radius * (ship.radiusMult || 1);
-    this.maxHp = Math.round(c.maxHp * ship.hpMult * (game.endless ? CONFIG.endless.hpMult : 1)); this.baseMaxHp = this.maxHp; this.hp = this.maxHp;
+    this.maxHp = Math.round(c.maxHp * ship.hpMult * diff.playerHpMult); this.baseMaxHp = this.maxHp; this.hp = this.maxHp;
     this.fireInterval = c.fireInterval * ship.fireMult;
-    this.power = 1; this.overcharge = 0;
+    this.power = 1 + diff.startPower; this.overcharge = 0;
     this.bombs = clamp(game.activeDiff.startBombs + ship.bombs, 0, CONFIG.player.maxBombs);
-    this.wings = ship.wings;      // A:僚机数
+    this.wings = clamp(ship.wings + diff.startWings, 0, CONFIG.wingMax);      // A:僚机数
     this.energy = 0;             // B:必杀能量 0-100
     this.specialCooldown = 0;    // Q:必杀冷却(秒),能量满 + 冷却结束才可释放
     this.invulnAmount = game.activeDiff.invuln;
@@ -428,17 +429,18 @@ class Enemy {
   constructor(type, x, yOffset = 0, move = "straight", elite = null) { this.init(type, x, yOffset, move, elite); }
   init(type, x, yOffset = 0, move = "straight", elite = null) {
     const t = CONFIG.enemy[type], chosenMove = t.move && (!move || move === "straight") ? t.move : (move || "straight");
+    const diff = game.activeEndlessDiff();
     this.type = type; this.isBoss = false; this.x = x; this.y = t.fromBottom ? CONFIG.HEIGHT + t.radius + yOffset : -t.radius - yOffset;
-    this.baseX = x; this.baseY = this.y; this.radius = t.radius; this.hp = t.hp; this.speed = t.speed; this.score = t.score; this.color = t.color; this.cfg = t;
+    this.baseX = x; this.baseY = this.y; this.radius = t.radius; this.hp = t.hp; this.speed = t.speed * diff.enemySpeedMult; this.score = t.score; this.color = t.color; this.cfg = t;
     this._fireTimer = 0.6 + game.rng() * 0.6; this.dead = false;
     this.elite = elite || this.rollElite(); this.eliteCfg = this.elite ? CONFIG.elite[this.elite] : null;
     const hpMult = game.endless ? game.endlessEnemyHpMult() : 1;
     this.eliteShieldMax = 0; this.eliteShield = 0; this._eliteCd = 1.2 + game.rng(); this._eliteWarn = 0;
-    if (game.endless) this.hp = Math.max(1, Math.round(this.hp * hpMult), game.endlessEnemyHpFloor());
+    if (game.endless) this.hp = Math.max(1, Math.round(this.hp * hpMult * diff.enemyHpMult), game.endlessEnemyHpFloor());
     if (this.eliteCfg) { this.hp = Math.round(this.hp * (this.eliteCfg.hpMult || 1)); this.score = Math.round(this.score * (this.eliteCfg.scoreMult || 1)); }
     if (game.endless) this.hp = Math.max(this.hp, game.endlessEnemyHpFloor());
     if (this.eliteCfg && this.eliteCfg.speedMult) this.speed *= this.eliteCfg.speedMult;
-    this.eliteShieldMax = Math.round((t.shield || 0) * hpMult) + (this.eliteCfg && this.eliteCfg.shield ? this.eliteCfg.shield : 0);
+    this.eliteShieldMax = Math.round((t.shield || 0) * hpMult * diff.enemyHpMult) + (this.eliteCfg && this.eliteCfg.shield ? this.eliteCfg.shield : 0);
     this.eliteShield = this.eliteShieldMax;
     this.maxHp = this.hp;
     // 运动状态
