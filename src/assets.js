@@ -90,7 +90,23 @@ const ImageAssets = {
     },
   },
   cache: {},
+  decodeCache: {},
   boundsCache: {},
+  preload: {
+    effects: "chain-spark shield-break repair-pulse weakpoint-marker shield-hit hit-spark mine-warning-pulse mine-armed floating-mine fire-zone ice-zone powerup-glow gravity-ring warning-laser-lane".split(" "),
+    uiIcons: "bomb charge-shot heal power-upgrade secondary-homing secondary-laser secondary-missile skill-fire skill-ice special-nuke special-shield special-stealth special-wave".split(" "),
+    chips: "capacitor charge-core homing-swarm laser-focus missile-barrage side-guns volatile-core".split(" "),
+    powerups: "bomb chip heal power wing".split(" "),
+    bonuses: "damage fire-rate range max-hp reinforced-hull armor-plating field-repair repair-loop repair-pulse leech living-armor medical-reservoir pain-converter missile-rack pierce chain-spark salvage shield-amplifier shield-breaker kinetic-ammo heavy-rounds armor-piercer armor-caliber stable-fire perfect-line side-cannons laser-lens laser-splitter swarm-core homing-shards signal-filter explosive-payload cluster-warheads missile-interceptor magnet-core combo-battery combo-barrage combo-surge charge-amp executioner elite-hunter reactive-armor last-stand emergency-barrier".split(" "),
+  },
+  missingBonusIcons: {
+    "vital-reactor": true,
+    "glass-cannon": true,
+    "boss-hunter": true,
+    "weak-scanner": true,
+    "adrenaline": true,
+    "overdrive": true,
+  },
   slug(key) {
     return String(key || "")
       .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
@@ -114,15 +130,78 @@ const ImageAssets = {
     else if (typeof value === "object") for (const v of Object.values(value)) this.sources(v, out);
     return out;
   },
+  dynamicSources() {
+    const srcs = [];
+    const cfg = typeof CONFIG !== "undefined" ? CONFIG : null;
+    const addKeys = (prefix, keys) => {
+      for (const key of keys || []) srcs.push(prefix + this.slug(key) + ".png");
+    };
+    if (cfg && cfg.shipOrder) addKeys("assets/images/ships/player-wingman-", cfg.shipOrder);
+    addKeys("assets/images/effects/effect-", this.preload.effects);
+    addKeys("assets/images/ui/icons/icon-", this.preload.uiIcons);
+    const powerupKeys = cfg && cfg.powerup
+      ? Object.keys(Object.assign({}, cfg.powerup.weights || {}, cfg.powerup.endlessWeights || {}))
+      : this.preload.powerups;
+    addKeys("assets/images/ui/powerups/icon-powerup-", powerupKeys);
+    addKeys("assets/images/ui/chips/icon-chip-", cfg && cfg.chipOrder || this.preload.chips);
+    const bonusKeys = (cfg && cfg.bonusOrder || this.preload.bonuses).filter(key => !this.missingBonusIcons[this.slug(key)]);
+    addKeys("assets/images/ui/bonuses/icon-bonus-", bonusKeys);
+    return srcs;
+  },
+  allSources() {
+    return Array.from(new Set(this.sources(this.manifest).concat(this.dynamicSources()))).filter(Boolean);
+  },
+  decode(img) {
+    if (!img) return Promise.resolve(false);
+    const key = img.src || "";
+    if (key && this.decodeCache[key]) return this.decodeCache[key];
+    const loaded = img.complete ? Promise.resolve(img.naturalWidth > 0) : new Promise(resolve => {
+      const done = (ok) => {
+        img.removeEventListener("load", onLoad);
+        img.removeEventListener("error", onError);
+        resolve(ok && img.naturalWidth > 0);
+      };
+      const onLoad = () => done(true);
+      const onError = () => done(false);
+      img.addEventListener("load", onLoad);
+      img.addEventListener("error", onError);
+    });
+    const promise = loaded.then(ok => {
+      if (!ok) return false;
+      if (!img.decode) return true;
+      return img.decode().then(() => true, () => true);
+    });
+    if (key) this.decodeCache[key] = promise;
+    return promise;
+  },
+  preloadSources(srcs, timeoutMs = 0) {
+    if (typeof Image === "undefined") return Promise.resolve(false);
+    const list = Array.from(new Set(srcs || [])).filter(Boolean);
+    const work = Promise.all(list.map(src => this.decode(this.ensure(src)))).then(() => true, () => false);
+    if (!timeoutMs) return work;
+    return Promise.race([work, new Promise(resolve => setTimeout(() => resolve(false), timeoutMs))]);
+  },
   load() {
-    if (typeof Image === "undefined") return;
-    for (const src of this.sources(this.manifest)) {
-      if (!src || this.cache[src]) continue;
-      const img = new Image();
-      img.decoding = "async";
-      img.src = src;
-      this.cache[src] = img;
-    }
+    return this.preloadSources(this.allSources());
+  },
+  criticalSources(opts = {}) {
+    const cfg = typeof CONFIG !== "undefined" ? CONFIG : null;
+    const shipKey = opts.shipKey || (cfg && cfg.shipOrder && cfg.shipOrder[0]) || "balanced";
+    const ship = cfg && cfg.ships && cfg.ships[shipKey];
+    const bg = this.manifest.background[opts.world || 1] || {};
+    return [
+      bg.base, bg.mid, bg.fg,
+      this.manifest.player[shipKey] || this.manifest.player.balanced,
+      "assets/images/ships/player-wingman-" + this.slug(shipKey) + ".png",
+      "assets/images/ui/icons/icon-bomb.png",
+      "assets/images/ui/icons/icon-special-" + this.slug(ship && ship.specialType || "nuke") + ".png",
+      "assets/images/ui/icons/icon-power-upgrade.png",
+      "assets/images/ui/powerups/icon-powerup-power.png",
+      "assets/images/ui/powerups/icon-powerup-heal.png",
+    ];
+  },
+  loadCritical(opts = {}) {
+    return this.preloadSources(this.criticalSources(opts), opts.timeoutMs || 900);
   },
   ready(src) {
     const img = typeof src === "string" ? this.ensure(src) : src;

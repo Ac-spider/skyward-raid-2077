@@ -17,6 +17,7 @@ game.diff = CONFIG.difficulties[Settings.data.diff];
 game.ship = CONFIG.ships[Settings.data.ship] || CONFIG.ships.balanced;
 game.autoNext = Settings.data.autoNext !== false;
 if (Settings.data.seenTutorial) game.toTitle(); else game.toTutorial();   // FF:首次启动自动展示新手引导
+drawBootLoading();
 let last = performance.now();
 function loop(now) {
   let dt = (now - last) / 1000; last = now;
@@ -30,4 +31,27 @@ function loop(now) {
   if (window.Multiplayer) Multiplayer.draw(ctx);
   requestAnimationFrame(loop);
 }
-requestAnimationFrame(loop);
+function drawBootLoading() {
+  const W = CONFIG.WIDTH, H = CONFIG.HEIGHT, cx = W / 2;
+  ctx.save();
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#081826");
+  g.addColorStop(1, "#0d3a5c");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "rgba(255,255,255,.18)";
+  for (let i = 0; i < 18; i++) ctx.fillRect((i * 73) % W, (i * 137) % H, i % 3 === 0 ? 2 : 1, 14 + (i % 4) * 8);
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#e7f5ff";
+  ctx.font = "bold 24px 'Segoe UI', sans-serif";
+  ctx.fillText("贴图载入中...", cx, H / 2);
+  ctx.fillStyle = "rgba(231,245,255,.68)";
+  ctx.font = "14px 'Segoe UI', sans-serif";
+  ctx.fillText("首次打开会稍慢，缺失素材仍会自动兜底", cx, H / 2 + 30);
+  ctx.restore();
+}
+function startLoop() {
+  last = performance.now();
+  requestAnimationFrame(loop);
+}
+ImageAssets.loadCritical({ shipKey: game.ship.key, world: game.world, timeoutMs: 900 }).then(startLoop, startLoop);
