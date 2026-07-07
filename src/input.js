@@ -113,6 +113,12 @@ canvas.addEventListener("pointercancel", (e) => {
   if (e.pointerId === input.movePointerId) { input.dragging = false; resetJoystick(); input.movePointerId = null; }
   game._sliderDrag = false; game._shipDragging = false; game._codexDragging = false; game._tutorialDragging = false; game._mapDragging = false; game._codexUpgradeDragging = false;
 });
+// OO:鼠标滚轮纵向滚动 —— 地图节点区域 / 强化图鉴列表,和拖动滚动共用同一份 clamp 逻辑,只是换一种输入方式
+canvas.addEventListener("wheel", (e) => {
+  const scale = CONFIG.HEIGHT / canvas.getBoundingClientRect().height, dy = e.deltaY * scale;
+  if (game.state === "map") { game._mapScrollY = clamp(game._mapScrollY + dy, 0, game.mapMaxScroll()); e.preventDefault(); return; }
+  if (game.state === "codex" && game._codexTab === "upgrade") { game._codexUpgradeScrollY = clamp(game._codexUpgradeScrollY + dy, 0, game.codexUpgradeMaxScroll()); e.preventDefault(); return; }
+}, { passive: false });
 window.addEventListener("keydown", (e) => {
   Sound.resume(); Music.resume(true);
   if (game.state === "chipselect" && ["1", "2", "3"].includes(e.key)) { game.chooseChip(Number(e.key) - 1); e.preventDefault(); return; }

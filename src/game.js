@@ -116,7 +116,7 @@ const game = {
     else if (dx > 40) this._codexBossIdx = (this._codexBossIdx - 1 + n) % n;
   },
   // OO:强化图鉴(无限挑战强化词条)纵向滚动区域 —— 和地图节点区域(mapViewportRect/mapMaxScroll)同一套算法
-  codexUpgradeViewportRect() { return { top: 118, bottom: CONFIG.HEIGHT - 56 }; },
+  codexUpgradeViewportRect() { return { top: 138, bottom: CONFIG.HEIGHT - 56 }; },
   codexUpgradeRowH() { return 62; },
   codexUpgradeGap() { return 8; },
   codexUpgradeContentH() { return CONFIG.bonusOrder.length * (this.codexUpgradeRowH() + this.codexUpgradeGap()) - this.codexUpgradeGap(); },
@@ -2612,15 +2612,16 @@ const game = {
     ctx.textAlign = "left";
   },
 
-  // ── OO:道具图鉴(图鉴第二个标签)——展示局内会掉落的补给种类,图标直接复用 drawPowerupToken(entities.js),
-  //   保证和实际掉落物像素级一致,数量少(5种)不用滚动 ──
+  // ── OO:道具图鉴(图鉴第二个标签)——展示局内会掉落的补给种类,图标直接复用 drawPowerupIcon(entities.js),
+  //   优先用真实美术图(和局内掉落物完全一致),数量少(5种)不用滚动 ──
   drawItemCodex(ctx) {
     const cx = CONFIG.WIDTH / 2, rowH = 76, gap = 10, x0 = 20, w = CONFIG.WIDTH - 40, order = CONFIG.powerupOrder;
     ctx.textAlign = "left"; ctx.fillStyle = "#868e96"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText("补给道具", 18, 128);
     order.forEach((kind, i) => {
-      const info = CONFIG.powerupInfo[kind], y = 138 + i * (rowH + gap);
+      const info = CONFIG.powerupInfo[kind], y = 138 + i * (rowH + gap), iconX = x0 + 40, iconY = y + rowH / 2;
       UI.panel(ctx, x0, y, w, rowH, 12, { accent: info.color });
-      drawPowerupToken(ctx, x0 + 40, y + rowH / 2, 15, kind, info.color, 6);
+      ctx.save(); ctx.globalAlpha = 0.75; ImageAssets.draw(ctx, ImageAssets.effect("powerupGlow"), iconX, iconY, 15 * 3.1); ctx.restore();
+      drawPowerupIcon(ctx, iconX, iconY, 15, kind, info.color, 6);
       ctx.fillStyle = info.labelColor || info.color; ctx.font = "bold 17px 'Segoe UI', sans-serif"; ctx.fillText(info.name, x0 + 76, y + 30);
       ctx.fillStyle = "#dee2e6"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText(info.desc, x0 + 76, y + 54);
     });
@@ -2635,7 +2636,7 @@ const game = {
     const cx = CONFIG.WIDTH / 2, vp = this.codexUpgradeViewportRect(), scrollY = this._codexUpgradeScrollY;
     const rowH = this.codexUpgradeRowH(), gap = this.codexUpgradeGap(), x0 = 20, w = CONFIG.WIDTH - 40;
     ctx.textAlign = "left"; ctx.fillStyle = "#868e96"; ctx.font = "13px 'Segoe UI', sans-serif";
-    ctx.fillText("无限挑战强化词条(共 " + CONFIG.bonusOrder.length + " 项)", 18, vp.top - 10);
+    ctx.fillText("无限挑战强化词条(共 " + CONFIG.bonusOrder.length + " 项)", 18, 128);
     ctx.save();
     ctx.beginPath(); ctx.rect(0, vp.top, CONFIG.WIDTH, vp.bottom - vp.top); ctx.clip();
     ctx.translate(0, -scrollY);

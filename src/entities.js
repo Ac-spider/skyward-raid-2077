@@ -1064,13 +1064,17 @@ class PowerUp {
       ctx.globalAlpha = 1;
     }
     ctx.globalAlpha = 0.75; ImageAssets.draw(ctx, ImageAssets.effect("powerupGlow"), x, y, r * 3.1); ctx.globalAlpha = 1;
-    if (ImageAssets.draw(ctx, ImageAssets.uiPowerup(this.kind), x, y, r * 2.5)) { ctx.restore(); return; }
-    drawPowerupToken(ctx, x, y, r, this.kind, bg, 12 * pulse);
+    drawPowerupIcon(ctx, x, y, r, this.kind, bg, 12 * pulse);
     ctx.restore();
   }
 }
-// OO:掉落物图标的完整绘制(渐变底 + 描边 + 白色图案)——单独抽出来,图鉴的道具页直接复用,
-// 保证图鉴里看到的图案和局内实际掉落的道具像素级一致,不用维护两份画法。
+// OO:掉落物图标——优先用真实美术图(assets/images/ui/powerups),没有素材才退回矢量占位图。
+// 单独抽出来,图鉴的道具页直接复用,保证图鉴里看到的图案和局内实际掉落的道具完全一致。
+function drawPowerupIcon(ctx, x, y, r, kind, bg, glowBlur = 8) {
+  if (ImageAssets.draw(ctx, ImageAssets.uiPowerup(kind), x, y, r * 2.5)) return;
+  drawPowerupToken(ctx, x, y, r, kind, bg, glowBlur);
+}
+// 矢量占位图标(渐变底 + 描边 + 白色图案)——无素材时的兜底画法,仅 drawPowerupIcon 内部调用。
 function drawPowerupToken(ctx, x, y, r, kind, bg, glowBlur = 8) {
   bg = bg || { heal: "#e03131", power: "#2f9e44", bomb: "#5f3dc4", wing: "#495057", chip: "#4dabf7" }[kind] || "#adb5bd";
   ctx.save(); ctx.shadowColor = bg; ctx.shadowBlur = glowBlur;
