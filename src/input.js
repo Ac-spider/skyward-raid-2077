@@ -44,7 +44,14 @@ function toggleMute() {
 canvas.addEventListener("pointerdown", (e) => {
   Sound.resume(); Music.resume(true);
   const p = toLogic(e.clientX, e.clientY);
-  if (game.state === "title") { if (game.titleSettingsHit(p.x, p.y)) { game._resetArmed = false; game._settingsReturnState = "title"; game.state = "settings"; return; } if (game.titleCodexHit(p.x, p.y)) { game.toCodex(); return; } if (game.titleHelpHit(p.x, p.y)) { game.toTutorial(); return; } if (game.titleShipHit(p.x, p.y)) { game.toShipSelect(); return; } if (game.titleChallengeHit(p.x, p.y)) { game.openChallengePrompt(); return; } if (game.titleEndlessHit(p.x, p.y)) { game.startEndless(); return; } if (game.titleStartHit(p.x, p.y)) game.toMap(); return; }
+  if (game.state === "title") { if (game.titleSettingsHit(p.x, p.y)) { game._resetArmed = false; game._settingsReturnState = "title"; game.state = "settings"; return; } if (game.titleCodexHit(p.x, p.y)) { game.toCodex(); return; } if (game.titleHelpHit(p.x, p.y)) { game.toTutorial(); return; } if (game.titleShipHit(p.x, p.y)) { game.toShipSelect(); return; } if (game.titleChallengeHit(p.x, p.y)) { game.openChallengePrompt(); return; } if (game.titleEndlessHit(p.x, p.y)) { game.state = "endlessdiff"; return; } if (game.titleStartHit(p.x, p.y)) game.toMap(); return; }
+  if (game.state === "endlessdiff") {
+    const inR = (r) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+    if (inR(game.endlessDiffNormalRect())) { game.setEndlessDiff("normal"); game.startEndless({ diff: "normal" }); return; }
+    if (inR(game.endlessDiffHellRect())) { game.setEndlessDiff("hell"); game.startEndless({ diff: "hell" }); return; }
+    if (!inR(game.endlessDiffPanelRect())) game.toTitle();
+    return;
+  }
   if (game.state === "endlessover") {
     if (!game.endlessLite && game.endlessChallengeHit(p.x, p.y)) { game.copyEndlessChallenge(); return; }
     const backToMap = game._endlessFrom === "map";   // GG:从地图进的无尽关卡,结算后原路回地图,而不是回首页
@@ -110,6 +117,7 @@ canvas.addEventListener("pointercancel", (e) => {
 });
 window.addEventListener("keydown", (e) => {
   Sound.resume(); Music.resume(true);
+  if (game.state === "endlessdiff" && e.key === "Escape") { game.toTitle(); e.preventDefault(); return; }
   if (game.state === "chipselect" && ["1", "2", "3"].includes(e.key)) { game.chooseChip(Number(e.key) - 1); e.preventDefault(); return; }
   if (game.state === "chipselect" && (e.key === "r" || e.key === "R")) { game.rerollChipDraft(); e.preventDefault(); return; }
   if (game.state === "chipselect" && (e.key === "s" || e.key === "S")) { game.skipChipDraft(); e.preventDefault(); return; }

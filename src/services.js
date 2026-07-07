@@ -126,7 +126,7 @@ const Haptics = {
 const Settings = {
   key: "kzts_settings",
   // JJ:音效/音乐拆成独立音量+独立开关(原来共用一个 volume,音乐音效没法分别调)
-  data: { sfxVolume: 0.8, musicVolume: 0.7, sound: true, music: true, haptics: true, diff: "normal", ship: "balanced", autoNext: true, hideWings: false, seenTutorial: false, controlMode: "drag" },
+  data: { sfxVolume: 0.8, musicVolume: 0.7, sound: true, music: true, haptics: true, diff: "normal", endlessDiff: "normal", ship: "balanced", autoNext: true, hideWings: false, seenTutorial: false, controlMode: "drag" },
   load() {
     try {
       const s = JSON.parse(localStorage.getItem(this.key));
@@ -135,6 +135,7 @@ const Settings = {
         if (s.volume != null && s.sfxVolume == null) s.sfxVolume = s.volume;
         if (s.volume != null && s.musicVolume == null) s.musicVolume = s.volume;
         Object.assign(this.data, s);
+        if (!CONFIG.endlessDifficulties[this.data.endlessDiff]) this.data.endlessDiff = "normal";
       }
     } catch (e) {}
     this.apply();
@@ -217,7 +218,7 @@ const Challenge = {
     return (CONFIG.challenge && CONFIG.challenge.rulesVersion) || 1;
   },
   routeSignature(seed, rulesVersion) {
-    const e = CONFIG.endless || {}, p = CONFIG.powerup || {}, spawn = e.spawn || {}, boss = e.boss || {};
+    const e = CONFIG.endless || {}, p = CONFIG.powerup || {}, spawn = e.spawn || {}, boss = e.boss || {}, hell = (CONFIG.endlessDifficulties || {}).hell || {};
     const splits = CONFIG.challenge && CONFIG.challenge.splits ? CONFIG.challenge.splits : [30, 60, 120];
     const enemy = CONFIG.enemy || {}, skillKeys = ["gunner", "beacon", "mineLayer", "tether"];
     const skillSig = skillKeys.map(k => {
@@ -230,6 +231,7 @@ const Challenge = {
       e.worldInterval || 40, e.powerupChance || 0, p.dropChance || 0,
       [p.chipMinEndlessTime, p.chipDraftInterval, p.chipBossDraftDelay, p.chipMinDraftGap].join(","),
       [e.eventClearScore, e.eventCleanShield, e.eventCleanShieldDur].join(","),
+      [hell.playerHpMult, hell.playerDmgMult, hell.startWings, hell.startPower, hell.startingDrafts, hell.draftInterval, hell.enemyHpMult, hell.bossHpMult, hell.enemySpeedMult, hell.enemyHpBoostMult, hell.enemyHpDoubleInterval, hell.dmgRampMult, hell.dmgDoubleInterval, hell.scoreMult].join(","),
       [e.startingDrafts, e.enemyHpBaseMult, e.enemyHpBoostTime, e.enemyHpBoostMult, e.enemyHpDoubleInterval, e.enemyHpFloorTime, e.enemyHpFloor, e.enemyHpFloorTargetTime, e.enemyHpFloorTarget, e.enemyHpFloorDoubleInterval, e.enemyHpFloorMax, e.dmgRampTime, e.dmgRampMult, e.dmgDoubleInterval].join(","),
       [spawn.initialDelay, spawn.intervalBase, spawn.intervalDecay, spawn.intervalMin, spawn.countBase, spawn.countStepSec, spawn.countStepMax].join(","),
       [boss.firstDelay, boss.interval, boss.baseHpMult, boss.secondHpMult, boss.hpGrowthMult, boss.hpGrowthMax, boss.drStart, boss.drStep, boss.drMax].join(","),

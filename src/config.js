@@ -292,6 +292,26 @@ const CONFIG = {
   // X4:机型专属必杀参数——shieldHp/shieldDur/healOnShield 给防御型;stealthDur 给侦查型;waveDamage/waveSpeed/waveWidthGrow 给平衡型
   special: { bossDamage: 110, gainPerKill: 3, gainBossKill: 25, passiveGainPerSec: 1.7, invuln: 0.8, cooldown: 15,
     shieldHp: 60, shieldDur: 9, healOnShield: 0.3, stealthDur: 4.0, waveDamage: 45 },
+  endlessDifficulties: {
+    normal: {
+      key: "normal", name: "普通 NORMAL", color: "#4dabf7",
+      playerHpMult: 1, playerDmgMult: 1, startWings: 0, startPower: 0,
+      startingDrafts: 2, draftInterval: 30,
+      enemyHpMult: 0.65, bossHpMult: 0.70, enemySpeedMult: 1,
+      enemyHpBoostMult: 2.0, enemyHpDoubleInterval: 180,
+      dmgRampMult: 2.2, dmgDoubleInterval: 420,
+      scoreMult: 1.0, fireMult: 1.0, dmgMult: 1.0, invuln: 1.2, startBombs: 3,
+    },
+    hell: {
+      key: "hell", name: "地狱 HELL", color: "#ff6b6b",
+      playerHpMult: 2, playerDmgMult: 2, startWings: 2, startPower: 2,
+      startingDrafts: 3, draftInterval: 30,
+      enemyHpMult: 1, bossHpMult: 1, enemySpeedMult: 1.15,
+      enemyHpBoostMult: null, enemyHpDoubleInterval: null,
+      dmgRampMult: null, dmgDoubleInterval: null,
+      scoreMult: 1.5, fireMult: 1.0, dmgMult: 1.0, invuln: 1.2, startBombs: 3,
+    },
+  },
   // F 无尽模式:玩家血量倍率更低、同屏敌人上限更小。T:难度统一固定,不跟随地图选择
   // dmgRampTime/dmgRampMult:经典无尽关卡(endlessLite)敌弹伤害从 t=0 的 1 倍线性增长,到 dmgRampTime 秒时封顶为 dmgRampMult 倍
   // GG:dmgDoubleInterval 给无尽挑战(非 lite)用——伤害按 2^(t/此值) 指数增长,不封顶,每过这么多秒伤害翻一倍
