@@ -20,7 +20,7 @@ const CONFIG = {
 
   player: {
     startX: 270, startY: 800, radius: 15, maxHp: 100, lerp: 0.35,
-    fireInterval: 0.11, bulletSpeed: 950, maxPower: 7, maxOvercharge: 5, maxBombs: 5, bombInvuln: 1.4,
+    fireInterval: 0.11, bulletSpeed: 950, maxPower: 8, maxOvercharge: 8, maxBombs: 5, bombInvuln: 1.4,
   },
   bullet: { radius: 5, damage: 1 },
   secondary: {
@@ -81,6 +81,7 @@ const CONFIG = {
     5: [ { ox: 0, deg: 0 }, { ox: -8, deg: -10 }, { ox: 8, deg: 10 }, { ox: -15, deg: -22 }, { ox: 15, deg: 22 } ],
     6: [ { ox: 0, deg: 0 }, { ox: -8, deg: -9 }, { ox: 8, deg: 9 }, { ox: -16, deg: -20 }, { ox: 16, deg: 20 }, { ox: -22, deg: -32 }, { ox: 22, deg: 32 } ],                                  // 7 路
     7: [ { ox: 0, deg: 0 }, { ox: -7, deg: -7 }, { ox: 7, deg: 7 }, { ox: -14, deg: -16 }, { ox: 14, deg: 16 }, { ox: -20, deg: -26 }, { ox: 20, deg: 26 }, { ox: -26, deg: -38 }, { ox: 26, deg: 38 } ],  // 9 路
+    8: [ { ox: 0, deg: 0 }, { ox: -7, deg: -6 }, { ox: 7, deg: 6 }, { ox: -13, deg: -13 }, { ox: 13, deg: 13 }, { ox: -19, deg: -22 }, { ox: 19, deg: 22 }, { ox: -25, deg: -32 }, { ox: 25, deg: 32 }, { ox: -31, deg: -42 }, { ox: 31, deg: 42 } ], // 11 路
   },
 
   // weights 普通掉落;endlessWeights 无尽掉落(炸弹更稀有)。火力满级后继续吃 power 会进入超载层数。
@@ -117,8 +118,8 @@ const CONFIG = {
     repairLoop: { name: "维修循环", desc: "每14秒恢复5%最大生命,满血转临时护盾", color: "#38d9a9", rarity: "稀有", weight: 36, every: 14, healPct: 0.05, shield: 6, maxShield: 30, dur: 5, pickBuff: { label: "立即修复 6%", healPct: 0.06 } },
     repairPulse: { name: "维修脉冲", desc: "治疗补给和维修循环会震击近身敌人", color: "#69db7c", rarity: "稀有", weight: 30, damage: 6, range: 155 },
     leech: { name: "吸能核心", desc: "击杀回复 1 生命,冷却 1.2 秒", color: "#e64980", heal: 1, cooldown: 1.2 },
-    livingArmor: { name: "活性装甲", desc: "每12次非炸弹击杀永久最大生命 +2,每层最多 +24", color: "#2f9e44", rarity: "稀有", weight: 38, every: 12, hp: 2, maxHp: 24, pickBuff: { label: "护盾 +8", shield: 8, dur: 4 } },
-    medicalReservoir: { name: "医疗储备", desc: "满血拾取治疗补给永久最大生命 +1,每层最多 +20", color: "#38d9a9", rarity: "稀有", weight: 36, hp: 1, maxHp: 20, pickBuff: { label: "护盾 +8", shield: 8, dur: 4 } },
+    livingArmor: { name: "活性装甲", desc: "每12次非炸弹击杀永久最大生命 +2,每层最多 +40", color: "#2f9e44", rarity: "稀有", weight: 38, every: 12, hp: 2, maxHp: 40, pickBuff: { label: "护盾 +8", shield: 8, dur: 4 } },
+    medicalReservoir: { name: "医疗储备", desc: "满血拾取治疗补给永久最大生命 +1,每层最多 +36", color: "#38d9a9", rarity: "稀有", weight: 36, hp: 1, maxHp: 36, pickBuff: { label: "护盾 +8", shield: 8, dur: 4 } },
     painConverter: { name: "痛觉转换", desc: "受伤时将损失生命转为必杀能量", color: "#f06595", rarity: "稀有", weight: 28, energyPerHp: 0.9, maxEnergy: 30, pickBuff: { label: "能量 +6", energy: 6 } },
     missileRack: { name: "备用弹仓", desc: "导弹 +1 且装填更快", color: "#ff922b", missileCount: 1, missileCooldownMult: 0.06 },
     pierce: { name: "穿甲弹链", desc: "主炮可额外穿透 1 个目标", color: "#ffd43b", pierce: 1 },
@@ -129,22 +130,22 @@ const CONFIG = {
     kineticAmmo: { name: "动能弹芯", desc: "主炮基础伤害 +1", color: "#ffa94d", bulletDamage: 1 },
     heavyRounds: { name: "钨芯重弹", desc: "主炮伤害 +2,主炮射速 -12%", color: "#ffd43b", rarity: "稀有", weight: 30, bulletDamage: 2, mainCooldownPenalty: 0.12 },
     armorPiercer: { name: "破甲弹芯", desc: "主炮对高生命敌机伤害 +28%", color: "#ff922b", rarity: "稀有", weight: 34, minHp: 12, heavyDamageMult: 0.28 },
-    armorCaliber: { name: "装甲口径", desc: "每15额外最大生命,主炮伤害 +1,每层最多 +3", color: "#38d9a9", rarity: "稀有", weight: 32, hpPerDamage: 15, maxDamage: 3 },
-    vitalReactor: { name: "生命炉心", desc: "每20额外最大生命,全武器伤害 +3%,每层最多 +16%", color: "#20c997", rarity: "稀有", weight: 30, hpPerDamageMult: 20, damageMult: 0.03, maxDamageMult: 0.16 },
+    armorCaliber: { name: "装甲口径", desc: "每15额外最大生命,主炮伤害 +1,每层最多 +5", color: "#38d9a9", rarity: "稀有", weight: 32, hpPerDamage: 15, maxDamage: 5 },
+    vitalReactor: { name: "生命炉心", desc: "每20额外最大生命,全武器伤害 +3%,每层最多 +26%", color: "#20c997", rarity: "稀有", weight: 30, hpPerDamageMult: 20, damageMult: 0.03, maxDamageMult: 0.26 },
     stableFire: { name: "稳态火控", desc: "生命高于70%时全武器伤害 +14%", color: "#38d9a9", rarity: "稀有", weight: 32, hpThreshold: 0.70, damageMult: 0.14 },
     perfectLine: { name: "完美航线", desc: "9秒未受击后伤害 +10%,射速 +6%", color: "#69db7c", rarity: "稀有", weight: 30, delay: 9, damageMult: 0.10, cooldownMult: 0.06 },
-    sideCannons: { name: "侧翼炮塔", desc: "主炮附加斜向侧翼火力,最多2对", color: "#ffd43b", rarity: "稀有", weight: 30, angle: 18, offset: 20, maxPairs: 2 },
+    sideCannons: { name: "侧翼炮塔", desc: "主炮附加斜向侧翼火力,最多3对", color: "#ffd43b", rarity: "稀有", weight: 30, angle: 18, offset: 20, maxPairs: 3 },
     laserLens: { name: "棱镜透镜", desc: "激光更痛、更窄、更久", color: "#cc5de8", rarity: "稀有", weight: 42, laserDamage: 1, laserWidthShrink: 0.06, laserDuration: 0.03 },
-    laserSplitter: { name: "分束棱镜", desc: "每层增加1对低伤害激光副束,最多3对", color: "#be4bdb", rarity: "稀有", weight: 30, offset: 34, maxPairs: 3, damageMult: 0.38, widthMult: 0.62 },
+    laserSplitter: { name: "分束棱镜", desc: "每层增加1对低伤害激光副束,最多4对", color: "#be4bdb", rarity: "稀有", weight: 30, offset: 34, maxPairs: 4, damageMult: 0.38, widthMult: 0.62 },
     swarmCore: { name: "蜂群协议", desc: "追踪弹 +1,锁定和伤害提升", color: "#4dabf7", rarity: "稀有", weight: 38, extraCount: 1, homingDamage: 1, targetRangeMult: 0.10 },
     homingShards: { name: "追踪裂片", desc: "追踪弹命中时溅射附近敌人", color: "#4dabf7", rarity: "稀有", weight: 32, damage: 1, range: 105 },
     signalFilter: { name: "抗干扰滤波", desc: "扰频减速效果降低 14%", color: "#15aabf", rarity: "稀有", weight: 34, jamResist: 0.14 },
     explosivePayload: { name: "高爆载荷", desc: "导弹伤害和爆炸范围提升", color: "#ff922b", rarity: "稀有", weight: 38, missileDamage: 2, splashMult: 0.20 },
-    clusterWarheads: { name: "集束弹头", desc: "导弹命中后释放追踪子弹", color: "#ff922b", rarity: "史诗", weight: 18, count: 2, maxCount: 4 },
+    clusterWarheads: { name: "集束弹头", desc: "导弹命中后释放追踪子弹", color: "#ff922b", rarity: "史诗", weight: 18, count: 2, maxCount: 6 },
     missileInterceptor: { name: "拦截爆破", desc: "导弹爆炸会清除爆点附近敌弹", color: "#ff922b", rarity: "稀有", weight: 32, rangeMult: 0.80, pickBuff: { label: "清弹 160", clearBullets: 160 } },
     magnetCore: { name: "回收磁场", desc: "补给吸附范围 +55%", color: "#20c997", magnetMult: 0.55, pickBuff: { label: "能量 +6", energy: 6 } },
     comboBattery: { name: "连击电池", desc: "每 10 连击获得能量和护盾", color: "#ffd43b", rarity: "稀有", weight: 36, energy: 12, shield: 6, dur: 4, pickBuff: { label: "能量 +8 / 护盾 +6", energy: 8, shield: 6, dur: 4 } },
-    comboBarrage: { name: "连击弹幕", desc: "每 10 连击释放追踪弹幕", color: "#4dabf7", rarity: "稀有", weight: 34, count: 2, maxCount: 6 },
+    comboBarrage: { name: "连击弹幕", desc: "每 10 连击释放追踪弹幕", color: "#4dabf7", rarity: "稀有", weight: 34, count: 2, maxCount: 8 },
     comboSurge: { name: "连击涡轮", desc: "每 10 连击获得 1 层过载", color: "#ffd43b", rarity: "史诗", weight: 18, overcharge: 1 },
     chargeAmp: { name: "蓄能放大器", desc: "蓄力激光更强,冷却更短", color: "#f783ac", rarity: "稀有", weight: 34, boostBonus: 3, cooldownMult: 0.10 },
     executioner: { name: "处决算法", desc: "对 40% 血以下敌人伤害 +25%", color: "#e64980", rarity: "稀有", weight: 34, threshold: 0.4, damageMult: 0.25 },
@@ -286,7 +287,7 @@ const CONFIG = {
       specialType: "stealth", specialName: "光学迷彩", specialDesc: "短暂隐身,期间免疫所有伤害" },
   },
   // A:僚机上限。B:必杀(能量攒满 + 冷却结束才可释放,offensive 全屏重伤;对 BOSS 伤害减半)
-  wingMax: 4,
+  wingMax: 5,
   // X3:cooldown 10→15(必杀强度没变,拉长间隔避免刷太快);新增 passiveGainPerSec —— 除了击杀攒能量,不管有没有击杀都按秒缓慢回能
   //   (60秒能从0攒满,纯粹是保底,不会比正常边打边攒更快),避免"没打到东西的时候必杀完全不涨"的干等感
   // X4:机型专属必杀参数——shieldHp/shieldDur/healOnShield 给防御型;stealthDur 给侦查型;waveDamage/waveSpeed/waveWidthGrow 给平衡型
@@ -297,17 +298,17 @@ const CONFIG = {
       key: "normal", name: "普通 NORMAL", color: "#4dabf7",
       playerHpMult: 1, playerDmgMult: 1, startWings: 0, startPower: 0,
       startingDrafts: 2, draftInterval: 30,
-      enemyHpMult: 0.65, bossHpMult: 0.70, enemySpeedMult: 1,
-      enemyHpBoostMult: 2.0, enemyHpDoubleInterval: 180,
+      enemyHpMult: 0.50, bossHpMult: 0.62, enemySpeedMult: 1,
+      enemyHpBoostMult: 1.6, enemyHpDoubleInterval: 240,
       dmgRampMult: 2.2, dmgDoubleInterval: 420,
       scoreMult: 1.0, fireMult: 1.0, dmgMult: 1.0, invuln: 1.2, startBombs: 3,
     },
     hell: {
       key: "hell", name: "地狱 HELL", color: "#ff6b6b",
-      playerHpMult: 2, playerDmgMult: 2, startWings: 2, startPower: 2,
+      playerHpMult: 2, playerDmgMult: 4, startWings: 2, startPower: 2,
       startingDrafts: 3, draftInterval: 30,
-      enemyHpMult: 1, bossHpMult: 1, enemySpeedMult: 1.15,
-      enemyHpBoostMult: null, enemyHpDoubleInterval: null,
+      enemyHpMult: 0.75, bossHpMult: 0.85, enemySpeedMult: 1.15,
+      enemyHpBoostMult: 2.2, enemyHpDoubleInterval: 180,
       dmgRampMult: null, dmgDoubleInterval: null,
       scoreMult: 1.5, fireMult: 1.0, dmgMult: 1.0, invuln: 1.2, startBombs: 3,
     },
@@ -316,7 +317,7 @@ const CONFIG = {
   // dmgRampTime/dmgRampMult:经典无尽关卡(endlessLite)敌弹伤害从 t=0 的 1 倍线性增长,到 dmgRampTime 秒时封顶为 dmgRampMult 倍
   // GG:dmgDoubleInterval 给无尽挑战(非 lite)用——伤害按 2^(t/此值) 指数增长,不封顶,每过这么多秒伤害翻一倍
   endless: {
-    hpMult: 0.7, maxEnemies: 10, diffKey: "normal", startingDrafts: 2, dmgRampTime: 300, dmgRampMult: 3, dmgDoubleInterval: 300, enemyHpBaseMult: 1.55, enemyHpBoostTime: 60, enemyHpBoostMult: 3, enemyHpDoubleInterval: 120, enemyHpFloorTime: 35, enemyHpFloor: 320, enemyHpFloorTargetTime: 200, enemyHpFloorTarget: 12000, enemyHpFloorDoubleInterval: 240, enemyHpFloorMax: 24000,
+    hpMult: 0.7, maxEnemies: 10, diffKey: "normal", startingDrafts: 2, dmgRampTime: 300, dmgRampMult: 3, dmgDoubleInterval: 300, enemyHpBaseMult: 1.25, enemyHpBoostTime: 60, enemyHpBoostMult: 2.2, enemyHpDoubleInterval: 180, enemyHpFloorTime: 35, enemyHpFloor: 220, enemyHpFloorTargetTime: 200, enemyHpFloorTarget: 8000, enemyHpFloorDoubleInterval: 240, enemyHpFloorMax: 16000,
     worldInterval: 40, powerupChance: 0.09,
     eventInterval: 28, eventDuration: 16, eventClearScore: 700, eventCleanShield: 18, eventCleanShieldDur: 5,
     spawn: { initialDelay: 1.0, intervalBase: 1.8, intervalDecay: 0.008, intervalMin: 0.8, countBase: 2, countStepSec: 15, countStepMax: 3 },
@@ -386,7 +387,7 @@ const CONFIG = {
       ],
     },
   },
-  challenge: { rulesVersion: 81, splits: [30, 60, 120] },
+  challenge: { rulesVersion: 83, splits: [30, 60, 120] },
 
   combo: { timeout: 2.5, scoreStep: 0.15, maxMult: 5, resetOnHit: false },
 

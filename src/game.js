@@ -709,10 +709,15 @@ const game = {
     if (!this.endless) return 0;
     const e = CONFIG.endless, t = e.enemyHpFloorTime == null ? Infinity : e.enemyHpFloorTime;
     if (this._endlessT < t) return 0;
-    const start = e.enemyHpFloor || 0, targetTime = e.enemyHpFloorTargetTime || t, target = e.enemyHpFloorTarget || start;
+    const scale = this.activeEndlessDiff().enemyHpMult || 1;
+    const start = (e.enemyHpFloor || 0) * scale, rampEnd = Math.max(t + 1, e.enemyHpBoostTime || t);
+    const targetTime = Math.max(rampEnd, e.enemyHpFloorTargetTime || rampEnd), target = (e.enemyHpFloorTarget || start) * scale;
     let floor = start;
-    if (this._endlessT < targetTime) {
-      const p = clamp((this._endlessT - t) / Math.max(1, targetTime - t), 0, 1);
+    if (this._endlessT < rampEnd) {
+      const p = clamp((this._endlessT - t) / Math.max(1, rampEnd - t), 0, 1);
+      floor = start * p * p;
+    } else if (this._endlessT < targetTime) {
+      const p = clamp((this._endlessT - rampEnd) / Math.max(1, targetTime - rampEnd), 0, 1);
       floor = start * Math.pow(Math.max(1, target / Math.max(1, start)), p);
     } else {
       floor = target * Math.pow(2, (this._endlessT - targetTime) / (e.enemyHpFloorDoubleInterval || 180));
@@ -725,6 +730,7 @@ const game = {
     return Math.min(cfg.hpGrowthMax || Infinity, (cfg.secondHpMult || 5) * Math.pow(cfg.hpGrowthMult || 2, n - 1));
   },
   endlessBossDamageReduction(n = this._endlessBossN) {
+    if (this.endless && !this.endlessLite && this.activeEndlessDiff().key === "normal") return 0;
     const cfg = CONFIG.endless.boss || {};
     return n <= 0 ? 0 : Math.min(cfg.drMax || 0.5, (cfg.drStart || 0.2) + Math.max(0, n - 1) * (cfg.drStep || 0.1));
   },
