@@ -5,6 +5,9 @@ output/
 .DS_Store
 Thumbs.db
 
+# worktrees
+.worktrees/
+
 # local/internal project notes
 AGENTS.md
 ASSET_PROMPTS.md
