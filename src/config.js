@@ -86,7 +86,7 @@ const CONFIG = {
 
   // weights 普通掉落;endlessWeights 无尽掉落(炸弹更稀有)。火力满级后继续吃 power 会永久强化主炮/激光。
   // autoInterval:常规关卡(非无尽)每隔多久自动刷新一个道具(秒)。
-  powerup: { radius: 14, speed: 130, dropChance: 0.11, healAmount: 12, autoInterval: 5, magnetRadius: 40, magnetSpeed: 640, chipMinPower: 5, chipMinEndlessTime: 30, chipDraftInterval: 30, chipBossDraftDelay: 30, chipMinDraftGap: 30,
+  powerup: { radius: 14, speed: 130, dropChance: 0.11, healAmount: 12, autoInterval: 5, magnetRadius: 40, magnetSpeed: 640, chipMinPower: 5, chipMinEndlessTime: 30, chipDraftInterval: 30, chipBossDraftDelay: 30, chipMinDraftGap: 30, fullWeightMult: 0.2,
     weights:        { power: 0.47, heal: 0.22, bomb: 0.12, wing: 0.14, chip: 0.05 },
     endlessWeights: { power: 0.48, heal: 0.23, bomb: 0.04, wing: 0.13, chip: 0.12 } },
   // OO:道具图鉴用的展示文案 —— 图标/配色直接复用 drawPowerupToken(见 entities.js),和局内掉落物完全一致
@@ -98,7 +98,7 @@ const CONFIG = {
     wing:   { name: "僚机", desc: "获得 1 架侧翼僚机,叠加火力覆盖", color: "#495057", labelColor: "#ced4da" },
     chip:   { name: "芯片", desc: "拾取后触发一次芯片/强化抽取", color: "#4dabf7" },
   },
-  overflow: { healShield: 30, healShieldDur: 8, bombEnergy: 26, wingChip: "sideGuns", threatGain: 18, score: 250, batchWindow: 0.3, extraScore: 80, extraEnergy: 8, energyCap: 60, healShieldStep: 8, healShieldCap: 60, healShieldDurStep: 0.6, healShieldDurCap: 12 },
+  overflow: { healShield: 30, healShieldDur: 8, bombEnergy: 26, wingChip: "sideGuns", threatGain: 18, score: 250, batchWindow: 0.3, extraScore: 80, extraEnergy: 8, energyCap: 60, powerDamageStep: 1, wingDamageStep: 0.25, healShieldStep: 8, healShieldCap: 60, healShieldDurStep: 0.6, healShieldDurCap: 12 },
   threat: {
     maxLevel: 5, perLevel: 80, scoreStep: 0.08, damageStep: 0.04,
     fullPowerPerSec: 2.4, comboPerSec: 2.0, noHitPerSec: 1.5, noHitDelay: 14,
@@ -107,9 +107,9 @@ const CONFIG = {
   },
   chipOrder: ["laserFocus", "homingSwarm", "missileBarrage", "chargeCore", "capacitor", "sideGuns", "volatileCore"],
   chips: {
-    laserFocus: { name: "聚焦激光", desc: "激光更窄,伤害更高", color: "#cc5de8", duration: 15, laserWidthMult: 0.72, laserDamageBonus: 2, laserDurationBonus: 0.08, pickBuff: { label: "能量 +6", energy: 6 } },
-    homingSwarm: { name: "蜂群追踪", desc: "追踪弹更多,锁定更远", color: "#4dabf7", duration: 14, intervalMult: 0.72, extraCount: 1, targetRange: 430, damageBonus: 2, pickBuff: { label: "护盾 +6", shield: 6, dur: 3 } },
-    missileBarrage: { name: "导弹齐射", desc: "导弹更多,爆炸范围扩大", color: "#ff922b", duration: 14, intervalMult: 0.78, extraCount: 1, damageBonus: 2, splashMult: 1.28, pickBuff: { label: "清弹 140", clearBullets: 140 } },
+    laserFocus: { name: "聚焦激光", desc: "激光更窄,伤害更高", color: "#cc5de8", duration: 15, laserWidthMult: 0.72, laserDamageBonus: 3, laserDurationBonus: 0.08, pickBuff: { label: "能量 +6", energy: 6 } },
+    homingSwarm: { name: "蜂群追踪", desc: "追踪弹更多,锁定更远", color: "#4dabf7", duration: 14, intervalMult: 0.72, extraCount: 1, targetRange: 430, damageBonus: 3, pickBuff: { label: "护盾 +6", shield: 6, dur: 3 } },
+    missileBarrage: { name: "导弹齐射", desc: "导弹更多,爆炸范围扩大", color: "#ff922b", duration: 14, intervalMult: 0.78, extraCount: 1, damageBonus: 3, splashMult: 1.28, pickBuff: { label: "清弹 140", clearBullets: 140 } },
     chargeCore: { name: "蓄能核心", desc: "蓄力更快,冷却更短", color: "#ffd43b", duration: 13, chargeRate: 1.55, cooldownMult: 0.60, boostBonus: 4, pickBuff: { label: "能量 +10", energy: 10 } },
     capacitor: { name: "电容护盾", desc: "过载层可抵消伤害", color: "#74c0fc", duration: 16, block: 24, pickBuff: { label: "护盾 +12", shield: 12, dur: 4 } },
     sideGuns: { name: "侧翼炮组", desc: "主炮附加斜向火力", color: "#ffd43b", duration: 14, angle: 24, pickBuff: { label: "能量 +6", energy: 6 } },
@@ -288,7 +288,7 @@ const CONFIG = {
       bodyShape: "bulk", lerpMult: 0.85, radiusMult: 1.15, dmgTakenMult: 0.8, energyMult: 1.0, comboTimeoutMult: 1.0, bombDmgMult: 1.25, specialCooldownMult: 1.0,
       weaponBias: { missileDamageBonus: 1, missileSplashMult: 1.18 },
       perkName: "钢铁装甲", perkDesc: "受到伤害 -20% · 导弹溅射更强",
-      specialType: "shield", specialName: "护盾展开", specialDesc: "立即回复部分生命,并展开可吸收伤害的能量护盾" },
+      specialType: "shield", specialName: "护盾展开", specialDesc: "立即回复部分生命,并展开最多抵挡2次伤害的能量护盾" },
     scout: { key: "scout", name: "侦查型", color: "#ffd43b", desc: "机动灵活·体积小", hpMult: 0.65, fireMult: 0.92, bombs: 1, wings: 0,
       bodyShape: "dart", lerpMult: 1.5, radiusMult: 0.78, dmgTakenMult: 1.0, energyMult: 1.15, comboTimeoutMult: 1.0, bombDmgMult: 1.0, specialCooldownMult: 0.75,
       weaponBias: { homingIntervalMult: 0.9, homingTurnBonus: 1.1, chargeRate: 1.1 },
@@ -296,12 +296,12 @@ const CONFIG = {
       specialType: "stealth", specialName: "光学迷彩", specialDesc: "短暂隐身,期间免疫所有伤害" },
   },
   // A:僚机上限。B:必杀(能量攒满 + 冷却结束才可释放,offensive 全屏重伤;对 BOSS 伤害减半)
-  wingMax: 5,
+  wingMax: 6,
   // X3:cooldown 10→15(必杀强度没变,拉长间隔避免刷太快);新增 passiveGainPerSec —— 除了击杀攒能量,不管有没有击杀都按秒缓慢回能
   //   (60秒能从0攒满,纯粹是保底,不会比正常边打边攒更快),避免"没打到东西的时候必杀完全不涨"的干等感
   // X4:机型专属必杀参数——shieldHp/shieldDur/healOnShield 给防御型;stealthDur 给侦查型;waveDamage/waveSpeed/waveWidthGrow 给平衡型
   special: { bossDamage: 110, gainPerKill: 3, gainBossKill: 25, passiveGainPerSec: 1.7, invuln: 0.8, cooldown: 15,
-    shieldHp: 60, shieldDur: 9, healOnShield: 0.3, stealthDur: 4.0, waveDamage: 45 },
+    shieldHp: 60, shieldDur: 9, shieldHits: 2, healOnShield: 0.3, stealthDur: 4.0, waveDamage: 45 },
   endlessDifficulties: {
     normal: {
       key: "normal", name: "常规演练", color: "#4dabf7",
@@ -314,19 +314,20 @@ const CONFIG = {
     },
     hell: {
       key: "hell", name: "绝境深潜", color: "#ff6b6b",
-      playerHpMult: 2, playerDmgMult: 4, startWings: 2, startPower: 2,
+      playerHpMult: 2, playerDmgMult: 3, startWings: 2, startPower: 2,
       startingDrafts: 3, draftInterval: 30,
-      enemyHpMult: 0.65, bossHpMult: 0.85, enemySpeedMult: 1.15,
+      enemyHpMult: 0.65, bossHpMult: 5, enemySpeedMult: 1.15,
       enemyHpBoostMult: 1.80, enemyHpDoubleInterval: 240,
       dmgRampMult: null, dmgDoubleInterval: null,
-      scoreMult: 1.5, fireMult: 1.0, dmgMult: 1.0, invuln: 1.2, startBombs: 3, bossInvulnDuration: 2,
+      scoreMult: 1.5, fireMult: 1.0, dmgMult: 1.0, invuln: 1.2, startBombs: 3, bossInvulnDuration: 5, bossBulletMult: 1.25,
     },
   },
   // F 无尽模式:玩家血量倍率更低、同屏敌人上限更小。T:难度统一固定,不跟随地图选择
   // dmgRampTime/dmgRampMult:经典无尽关卡(endlessLite)敌弹伤害从 t=0 的 1 倍线性增长,到 dmgRampTime 秒时封顶为 dmgRampMult 倍
   // GG:dmgDoubleInterval 给无尽挑战(非 lite)用——伤害按 2^(t/此值) 指数增长,不封顶,每过这么多秒伤害翻一倍
   endless: {
-    hpMult: 0.7, maxEnemies: 10, diffKey: "normal", startingDrafts: 2, dmgRampTime: 300, dmgRampMult: 3, dmgDoubleInterval: 300, enemyHpBaseMult: 1.15, enemyHpBoostTime: 60, enemyHpBoostMult: 1.8, enemyHpDoubleInterval: 240, enemyHpFloorTime: 35, enemyHpFloor: 170, enemyHpFloorTargetTime: 200, enemyHpFloorTarget: 5600, enemyHpFloorDoubleInterval: 240, enemyHpFloorMax: 11000,
+    hpMult: 0.7, maxEnemies: 10, diffKey: "normal", startingDrafts: 2, dmgRampTime: 300, dmgRampMult: 3, dmgDoubleInterval: 300, enemyHpBaseMult: 1.15, enemyHpBoostTime: 60, enemyHpBoostMult: 1.8, enemyHpDoubleInterval: 240, enemyHpFloorTime: 35, enemyHpFloor: 170, enemyHpFloorTargetTime: 200, enemyHpFloorTarget: 5600, enemyHpFloorDoubleInterval: 240, enemyHpLateTime: 300, enemyHpLateDoubleInterval: 150, enemyHpFloorLateDoubleInterval: 180, enemyHpFloorMax: 22000,
+    dynamicHp: { startTime: 300, interval: 60, enemyLife: 3, enemyFailRatio: 0.9, enemyTargetLife: 2, enemyMinSamples: 10, bossTargetLife: 60, bossMinGap: 10, bossDamageReduction: 0.5, enemyDamageReduction: 0.05, score: 3000 },
     worldInterval: 40, powerupChance: 0.09,
     eventInterval: 28, eventDuration: 16, eventClearScore: 700, eventCleanShield: 18, eventCleanShieldDur: 5,
     spawn: { initialDelay: 1.0, intervalBase: 1.8, intervalDecay: 0.008, intervalMin: 0.8, countBase: 2, countStepSec: 15, countStepMax: 3 },
@@ -377,6 +378,7 @@ const CONFIG = {
         { key: "barrage", name: "弹幕", desc: "周期环形弹幕", color: "#ff922b", attack: "ring", every: 6.2, count: 14, speed: 230, damageMult: 0.78, scoreMult: 1.16 },
         { key: "escort", name: "护卫", desc: "周期投放精英僚机", color: "#51cf66", attack: "escort", every: 7.5, enemy: "gunner", elite: "charger", maxAdds: 4, scoreMult: 1.14 },
         { key: "aceEscort", name: "王牌", desc: "周期投放狂暴精英重炮机", color: "#ff6b6b", attack: "escort", every: 8.0, enemy: "gunner", elite: "berserker", maxAdds: 3, scoreMult: 1.18 },
+        { key: "eliteCommand", name: "统御", desc: "周期召唤高空精英机", color: "#ff6b6b", attack: "escort", every: 6.5, enemy: "gunner", elite: "berserker", maxAdds: 3, hpPct: 0.2, holdTop: true, scoreMult: 1.22 },
         { key: "ewar", name: "电子战", desc: "周期投放扰频精英机", color: "#15aabf", attack: "escort", every: 8.2, enemy: "jammer", elite: "jammer", maxAdds: 3, scoreMult: 1.18 },
         { key: "shieldEscort", name: "盾卫", desc: "周期投放护盾运输机", color: "#74c0fc", attack: "escort", every: 8.8, enemy: "shieldCarrier", maxAdds: 3, scoreMult: 1.17 },
         { key: "phantomEscort", name: "幻影", desc: "周期投放高速幻影僚机", color: "#22d3ee", attack: "escort", every: 7.0, enemy: "phantom", maxAdds: 4, scoreMult: 1.16 },
@@ -396,7 +398,7 @@ const CONFIG = {
       ],
     },
   },
-  challenge: { rulesVersion: 87, splits: [30, 60, 120] },
+  challenge: { rulesVersion: 96, splits: [30, 60, 120] },
 
   combo: { timeout: 2.5, scoreStep: 0.15, maxMult: 5, resetOnHit: false },
 
@@ -435,3 +437,4 @@ const TUTORIAL_PAGES = [
   { icon: "⚠", title: "BOSS 机制", lines: ["BOSS 血量过低会触发狂暴,攻击变快变猛", "镭射攻击有红色预警,亮起后千万别站在里面", "首页"+ "「📖 图鉴」" + "可以查看所有 BOSS 的详细信息"] },
   { icon: "🛩", title: "机型 & 世界", lines: ["不同机型有独特的被动技能和专属机型技能,首页可左右滑动查看", "关卡地图也能换机型,和首页共用同一个选择", "已开放 5 个世界共 15 关,难度逐步升级"] },
 ];
+

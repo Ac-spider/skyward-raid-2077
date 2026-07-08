@@ -22,7 +22,7 @@ class Player {
     this.slowTimer = 0; this.slowMult = 1;
     this.invulnTimer = 0; this._flameTimer = 0;   // RR:引擎尾焰粒子发射计时
     // X4:机型专属必杀状态——护盾(防御型)/隐身(侦查型)。攻击型必杀(全屏重伤)/平衡型必杀(冲击波)不需要常驻状态,现开现用。
-    this.shieldHp = 0; this.shieldMax = 0; this.shieldTimer = 0; this.stealthTimer = 0;
+    this.shieldHp = 0; this.shieldMax = 0; this.shieldTimer = 0; this.shieldHits = 0; this.stealthTimer = 0;
   }
   update(dt) {
     const c = CONFIG.player;
@@ -47,7 +47,7 @@ class Player {
       if (this.charge >= CONFIG.charge.max) game.releaseCharge();
     }
     if (this.stealthTimer > 0) this.stealthTimer -= dt;
-    if (this.shieldTimer > 0) { this.shieldTimer -= dt; if (this.shieldTimer <= 0) { this.shieldHp = 0; this.shieldMax = 0; } }
+    if (this.shieldTimer > 0) { this.shieldTimer -= dt; if (this.shieldTimer <= 0) { this.shieldHp = 0; this.shieldMax = 0; this.shieldHits = 0; } }
     this.addEnergy(CONFIG.special.passiveGainPerSec * dt);   // X3:必杀能量随时间缓慢自然回复,不完全依赖击杀
     // RR:引擎尾焰拖尾粒子(叠加在三角形闪烁尾焰之下,做出推进的动态感)
     this._flameTimer -= dt;
@@ -118,6 +118,8 @@ class Player {
       blocked = true;
       if (dmg <= this.shieldHp) { this.shieldHp -= dmg; dmg = 0; }
       else { dmg -= this.shieldHp; this.shieldHp = 0; this.shieldTimer = 0; }
+      if (this.shieldHits > 0 && --this.shieldHits <= 0) { this.shieldHp = 0; this.shieldTimer = 0; }
+      if (this.shieldHp <= 0) this.shieldHits = 0;
     }
     if (dmg > 0 && game.chipActive("capacitor") && this.overcharge > 0) {
       const block = Math.min(dmg, CONFIG.chips.capacitor.block);
@@ -138,10 +140,10 @@ class Player {
   }
   addPower() {
     if (this.power < CONFIG.player.maxPower) this.power++;
-    else { this.overcharge = clamp(this.overcharge + 1, 0, CONFIG.player.maxOvercharge); this.powerDamage++; }
+    else { this.overcharge = clamp(this.overcharge + 1, 0, CONFIG.player.maxOvercharge); this.powerDamage += CONFIG.overflow.powerDamageStep || 1; }
   }
   addBomb()    { this.bombs = clamp(this.bombs + 1, 0, CONFIG.player.maxBombs); }
-  addWing()    { if (this.wings < CONFIG.wingMax) this.wings++; else this.wingDamage++; }
+  addWing()    { if (this.wings < CONFIG.wingMax) this.wings++; else this.wingDamage += CONFIG.overflow.wingDamageStep || 0.25; }
   addEnergy(n) { this.energy = clamp(this.energy + n * (this.ship.energyMult || 1), 0, 100); }
   heal(n)      { this.hp = clamp(this.hp + n, 0, this.maxHp); }
   applySlow(mult, dur) {
@@ -152,6 +154,7 @@ class Player {
     this.shieldHp = Math.max(this.shieldHp, n);
     this.shieldMax = Math.max(this.shieldMax, n);
     this.shieldTimer = Math.max(this.shieldTimer, dur);
+    this.shieldHits = 0;
     game.spawnShockwave(this.x, this.y, this.radius * 2.2, "#74c0fc");
   }
   // X4:原来的机身绘制拆成 _drawBody,供隐身态(稳定半透明)和正常态共用,避免复制一遍
@@ -436,7 +439,7 @@ class Enemy {
     const diff = game.activeEndlessDiff();
     this.type = type; this.isBoss = false; this.x = x; this.y = t.fromBottom ? CONFIG.HEIGHT + t.radius + yOffset : -t.radius - yOffset;
     this.baseX = x; this.baseY = this.y; this.radius = t.radius; this.hp = t.hp; this.speed = t.speed * diff.enemySpeedMult; this.score = t.score; this.color = t.color; this.cfg = t;
-    this._fireTimer = 0.6 + game.rng() * 0.6; this.dead = false;
+    this._fireTimer = 0.6 + game.rng() * 0.6; this.dead = false; this._endlessSpawnT = game.endless ? game._endlessT : null;
     this.elite = elite || this.rollElite(); this.eliteCfg = this.elite ? CONFIG.elite[this.elite] : null;
     const hpMult = game.endless ? game.endlessEnemyHpMult() : 1;
     this.eliteShieldMax = 0; this.eliteShield = 0; this._eliteCd = 1.2 + game.rng(); this._eliteWarn = 0;
@@ -662,19 +665,25 @@ class Enemy {
     this._flash = 0.08;
   }
   damage(d, source = "") {
+    let dealt = 0;
+    d *= 1 - Math.max(game.endlessEnemyDamageReduction ? game.endlessEnemyDamageReduction() : 0, this._bossEliteDr || 0);
     if (this.guardShield > 0) {
       const used = Math.min(this.guardShield, d);
-      this.guardShield -= used; d -= used; this._flash = 0.06;
-      if (this.guardShield > 0) return false;
+      this.guardShield -= used; d -= used; dealt += used; this._flash = 0.06;
+      if (this.guardShield > 0) { game.recordEndlessPlayerDamage(dealt); return false; }
     }
     if (this.eliteShield > 0) {
       const mult = 1 + game.bonusValue("shieldBreaker", "shieldDamageMult");
       const used = Math.min(this.eliteShield, d * mult);
-      this.eliteShield -= used; d -= used / mult; this._flash = 0.06;
+      this.eliteShield -= used; d -= used / mult; dealt += used; this._flash = 0.06;
       if (this.eliteShield <= 0) game.triggerShieldBreak(this);
-      if (this.eliteShield > 0) return false;
+      if (this.eliteShield > 0) { game.recordEndlessPlayerDamage(dealt); return false; }
     }
-    this.hp -= d; this._flash = 0.06; if (this.hp <= 0) { this.dead = true; return true; }
+    if (this._bossEliteMinLifeT && game._endlessT < this._bossEliteMinLifeT && game.boss && !game.boss.dead && this.hp - d <= 0) {
+      dealt += Math.max(0, this.hp - 1); this.hp = 1; game.recordEndlessPlayerDamage(dealt); this._flash = 0.06; return false;
+    }
+    dealt += Math.max(0, Math.min(this.hp, d));
+    this.hp -= d; game.recordEndlessPlayerDamage(dealt); this._flash = 0.06; if (this.hp <= 0) { this.dead = true; return true; }
     if (source === "bullet") this.reflectShot();
     return false;
   }
@@ -889,11 +898,12 @@ class Enemy {
 // Y:laser 有独立冷却(atk.cd,默认3秒),不跟随 phase.cd 高频触发(避免和 spiral 等快速 tick 撞在一起刷屏)
 function runBossAttack(b, atk) {
   const g = game, dmg = b.bulletDamage;
-  if (atk.type === "fanDown") g.fireFan(b.x, b.y + b.radius, Math.PI / 2, atk.spread * DEG, atk.count, atk.speed, dmg);
-  else if (atk.type === "aimed") { const a = Math.atan2(g.player.y - b.y, g.player.x - b.x); g.fireFan(b.x, b.y, a, atk.spread * DEG, atk.count, atk.speed, dmg); }
-  else if (atk.type === "ring") g.fireRing(b.x, b.y, atk.count, atk.speed, dmg);
-  else if (atk.type === "spiral") { b._spiral += atk.step * DEG; for (let i = 0; i < atk.arms; i++) { const a = b._spiral + i * (Math.PI * 2 / atk.arms); g.spawnEnemyBullet(b.x, b.y, Math.cos(a) * atk.speed, Math.sin(a) * atk.speed, dmg); } }
-  else if (atk.type === "wall") { const gapX = g.player.x; for (let x = 24; x < CONFIG.WIDTH - 24; x += atk.spacing) { if (Math.abs(x - gapX) < atk.gap) continue; g.spawnEnemyBullet(x, b.y + b.radius * 0.4, 0, atk.speed, dmg); } }
+  const bulletMult = g.endless && !g.endlessLite ? (g.activeEndlessDiff().bossBulletMult || 1) : 1, count = n => Math.max(n, Math.round(n * bulletMult));
+  if (atk.type === "fanDown") g.fireFan(b.x, b.y + b.radius, Math.PI / 2, atk.spread * DEG, count(atk.count), atk.speed, dmg);
+  else if (atk.type === "aimed") { const a = Math.atan2(g.player.y - b.y, g.player.x - b.x); g.fireFan(b.x, b.y, a, atk.spread * DEG, count(atk.count), atk.speed, dmg); }
+  else if (atk.type === "ring") g.fireRing(b.x, b.y, count(atk.count), atk.speed, dmg);
+  else if (atk.type === "spiral") { const arms = count(atk.arms); b._spiral += atk.step * DEG; for (let i = 0; i < arms; i++) { const a = b._spiral + i * (Math.PI * 2 / arms); g.spawnEnemyBullet(b.x, b.y, Math.cos(a) * atk.speed, Math.sin(a) * atk.speed, dmg); } }
+  else if (atk.type === "wall") { const gapX = g.player.x; for (let x = 24; x < CONFIG.WIDTH - 24; x += Math.max(24, atk.spacing / bulletMult)) { if (Math.abs(x - gapX) < atk.gap) continue; g.spawnEnemyBullet(x, b.y + b.radius * 0.4, 0, atk.speed, dmg); } }
   else if (atk.type === "laser") { if (b._laserCd <= 0) { g.spawnBossLaser(atk.aimed ? g.player.x : b.x, atk.warn || 0.6, atk.dur || 0.8, atk.width || 46, dmg); b._laserCd = atk.cd || 3.0; } }
   else if (atk.type === "dualLaser") {
     if (b._laserCd <= 0) {
@@ -905,9 +915,9 @@ function runBossAttack(b, atk) {
   }
   else if (atk.type === "prismBurst") {
     if (b._laserCd <= 0) {
-      const x = g.player ? g.player.x : b.x, count = atk.count || 6, speed = atk.speed || 210;
+      const x = g.player ? g.player.x : b.x, n = count(atk.count || 6), speed = atk.speed || 210;
       g.spawnBossLaser(x, atk.warn || 0.55, atk.dur || 0.7, atk.width || 44, dmg);
-      for (let i = 0; i < count; i++) {
+      for (let i = 0; i < n; i++) {
         const side = i % 2 ? 1 : -1, row = Math.floor(i / 2), y = b.y + b.radius + row * 18;
         g.spawnEnemyBullet(b.x + side * b.radius * 0.65, y, side * speed, 70 + row * 20, dmg * 0.75);
       }
@@ -978,13 +988,15 @@ class Boss {
   }
   damage(d) {
     if (this._invulnTimer > 0) { this._flash = 0.04; return false; }
-    if (this._endlessDr > 0) d *= 1 - this._endlessDr;
+    const before = this.hp;
+    const dr = Math.max(this._endlessDr || 0, game.endlessBossDamageReductionBoost ? game.endlessBossDamageReductionBoost() : 0);
+    if (dr > 0) d *= 1 - dr;
     if (this.def.guardDR && game.bossEscortCount() > 0 && this._weakTimer <= 0) d *= 1 - this.def.guardDR;
     const threshold = this._invulnLeft > 0 ? this._invulnLeft / (this._invulnTotal + 1) : 0, nextHp = this.hp - d;
     if (threshold > 0 && this.hp / this.maxHp > threshold && nextHp / this.maxHp <= threshold) {
-      this.hp = Math.max(1, Math.round(this.maxHp * threshold)); this._flash = 0.09; this.startInvuln(); return false;
+      this.hp = Math.max(1, Math.round(this.maxHp * threshold)); game.recordEndlessPlayerDamage(Math.max(0, before - this.hp)); this._flash = 0.09; this.startInvuln(); return false;
     }
-    this.hp = nextHp; this._flash = 0.09; if (this.hp <= 0) { this.dead = true; return true; } return false;
+    this.hp = nextHp; game.recordEndlessPlayerDamage(Math.max(0, before - Math.max(0, this.hp))); this._flash = 0.09; if (this.hp <= 0) { this.dead = true; return true; } return false;
   }
   startInvuln() {
     const inv = CONFIG.bossInvuln || {}, min = inv.minDuration || 5, max = inv.maxDuration || min;

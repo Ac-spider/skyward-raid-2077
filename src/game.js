@@ -28,7 +28,7 @@ const game = {
   _levelTransX: 0, _levelTransY: 0, _levelTransT: 0,   // NN:进入关卡的聚焦扩散过渡(从点击处展开)
   _worldTransFrom: 1, _worldTransT: 99,   // VV:战斗中背景世界切换的交叉淡入
   autoNext: false, autoSpecial: false, autoLaser: false,   // OO:三项默认均不勾选(结算/技能/激光自动化,用户可在结算页/暂停页开启)
-  endless: false, endlessLite: false, _endlessFrom: "title", _endlessDiffKey: "normal", challengeSeed: "", challengeMode: false, challengeDaily: false, challengeTarget: null, challengeSplits: [], rivalInterference: null, _rng: null, _endlessT: 0, _endlessSpawnT: 0, _endlessBossT: 0, _endlessBossN: 0, _endlessEventT: 0, _endlessEventTimer: 0, _endlessEvent: null, _endlessHazardT: 0, _endlessEventStartHits: 0, _endlessEventStartKills: 0, _endlessEventStartEliteKills: 0, _endlessEventsSeen: [], _endlessRecentEvents: [], _endlessStats: null, _endlessTimeline: [], _endlessMarkIdx: 0,
+  endless: false, endlessLite: false, _endlessFrom: "title", _endlessDiffKey: "normal", challengeSeed: "", challengeMode: false, challengeDaily: false, challengeTarget: null, challengeSplits: [], rivalInterference: null, _rng: null, _endlessT: 0, _endlessSpawnT: 0, _endlessBossT: 0, _endlessBossN: 0, _endlessEventT: 0, _endlessEventTimer: 0, _endlessEvent: null, _endlessHazardT: 0, _endlessEventStartHits: 0, _endlessEventStartKills: 0, _endlessEventStartEliteKills: 0, _endlessEventsSeen: [], _endlessRecentEvents: [], _endlessStats: null, _endlessAdaptiveHp: null, _endlessTimeline: [], _endlessMarkIdx: 0,
   _endlessBossAffixesSeen: [], _endlessRecentBossAffixes: [],
   _shake: 0, _shakeT: 0, _hitStopT: 0,   // N:打击感
   // 触控按钮放大,便于拇指操作
@@ -79,6 +79,10 @@ const game = {
     }
     return CONFIG.endlessDifficulties[this._endlessDiffKey] || CONFIG.endlessDifficulties.normal;
   },
+  endlessDynamicHpActive() { return this.endless && !this.endlessLite && this.activeEndlessDiff().key === "hell"; },
+  endlessDynamicStarted() { return this.endlessDynamicHpActive() && this._endlessT >= ((CONFIG.endless.dynamicHp || {}).startTime || 300); },
+  endlessEnemyDamageReduction() { return this.endlessDynamicStarted() ? ((CONFIG.endless.dynamicHp || {}).enemyDamageReduction || 0) : 0; },
+  endlessBossDamageReductionBoost() { return this.endlessDynamicStarted() ? ((CONFIG.endless.dynamicHp || {}).bossDamageReduction || 0) : 0; },
   worldTransitionDur() { return 1.4; },
   setWorld(world, fade = false) { if (this.world === world) return; this._worldTransFrom = this.world; this._worldTransT = fade ? 0 : this.worldTransitionDur(); this.world = world; },
   // R:首页机型选择(左右滑动的卡片页,关卡地图的机型选项保留不变)
@@ -184,7 +188,7 @@ const game = {
   pauseButtonHit(x, y) { const b = this.pauseBtn; return (x - b.x) ** 2 + (y - b.y) ** 2 <= b.r * b.r; },
   // 开始某一关(索引)
   startLevel(i) {
-    this.currentLevel = i; this.world = LEVELS[i].world; this.endless = false; this.endlessLite = false; this.challengeSeed = ""; this.challengeMode = false; this.challengeDaily = false; this.challengeTarget = null; this.challengeSplits = []; this.rivalInterference = null; this._rng = null; this._endlessEvent = null; this._endlessEventTimer = 0; this._endlessEventT = 0; this._endlessHazardT = 0; this._endlessEventStartHits = 0; this._endlessEventStartKills = 0; this._endlessEventStartEliteKills = 0; this._endlessEventsSeen = []; this._endlessRecentEvents = []; this._endlessStats = null; this._endlessTimeline = []; this._endlessMarkIdx = 0;
+    this.currentLevel = i; this.world = LEVELS[i].world; this.endless = false; this.endlessLite = false; this.challengeSeed = ""; this.challengeMode = false; this.challengeDaily = false; this.challengeTarget = null; this.challengeSplits = []; this.rivalInterference = null; this._rng = null; this._endlessEvent = null; this._endlessEventTimer = 0; this._endlessEventT = 0; this._endlessHazardT = 0; this._endlessEventStartHits = 0; this._endlessEventStartKills = 0; this._endlessEventStartEliteKills = 0; this._endlessEventsSeen = []; this._endlessRecentEvents = []; this._endlessStats = null; this._endlessAdaptiveHp = null; this._endlessTimeline = []; this._endlessMarkIdx = 0;
     this._worldTransFrom = this.world; this._worldTransT = this.worldTransitionDur();
     this._startingDrafts = 0; this._startingDraftsTotal = 0;
     this.state = "playing";
@@ -229,6 +233,7 @@ const game = {
     this._endlessT = 0; this._endlessSpawnT = CONFIG.endless.spawn.initialDelay; this._endlessBossT = CONFIG.endless.boss.firstDelay; this._endlessBossN = 0;
     this._endlessEvent = null; this._endlessEventTimer = 0; this._endlessEventT = CONFIG.endless.eventInterval * 0.65; this._endlessHazardT = 0; this._endlessEventStartHits = 0; this._endlessEventStartKills = 0; this._endlessEventStartEliteKills = 0; this._endlessEventsSeen = []; this._endlessRecentEvents = []; this._endlessBossAffixesSeen = []; this._endlessRecentBossAffixes = [];
     this.resetEndlessTelemetry();
+    this.resetEndlessAdaptiveHp();
     director.begin(null);
     input.targetX = CONFIG.player.startX; input.targetY = CONFIG.player.startY;
     Sound.start(); Music.play();
@@ -274,6 +279,10 @@ const game = {
   endlessSpawnCount(t) {
     const s = CONFIG.endless.spawn;
     return s.countBase + Math.min(s.countStepMax, Math.floor(t / s.countStepSec));
+  },
+  endlessSpawnWaveCount(t) {
+    const total = this.endlessSpawnCount(t) + this.endlessEventValue("spawnBonus", 0);
+    return Math.max(1, Math.round(total * (this.boss && !this.boss.dead ? 0.5 : 1)));
   },
   activeEndlessEvent() { return this.endless && this._endlessEventTimer > 0 ? this._endlessEvent : null; },
   activeEventRouteBias() {
@@ -385,6 +394,7 @@ const game = {
     if (!this.endlessLite) {
       this.recordChallengeSplits();
       this.recordEndlessTelemetry();
+      this.updateEndlessDynamicHp();
       if (this.updateChipDraftTimer()) return;
       this.updateEndlessEvent(dt);
       this.updateRivalInterference();
@@ -394,7 +404,7 @@ const game = {
     if (this._endlessSpawnT <= 0 && this.enemies.length < CONFIG.endless.maxEnemies) {
       const t = this._endlessT;
       this._endlessSpawnT = this.endlessSpawnInterval(t);
-      const n = Math.min(this.endlessSpawnCount(t) + this.endlessEventValue("spawnBonus", 0), CONFIG.endless.maxEnemies - this.enemies.length);   // 出怪量保留上限,后期淘汰交给血量和伤害曲线
+      const n = Math.min(this.endlessSpawnWaveCount(t), CONFIG.endless.maxEnemies - this.enemies.length);   // 出怪量保留上限,BOSS 在场时波次减半
       const pool = this.endlessPool(t), moves = CONFIG.endless.moves;
       for (let i = 0; i < n; i++) {
         const eventType = this.endlessEventValue("enemyType", null), eventChance = this.endlessEventValue("enemyChance", 0);
@@ -444,6 +454,10 @@ const game = {
     this._endlessStats = { kills: 0, eliteKills: 0, bossKills: 0, hits: 0, blocked: 0, damageTaken: 0, bombs: 0, drafts: 0, picks: 0, skips: 0, rerolls: 0, events: 0, eventClears: 0, cleanEvents: 0, eventFails: 0, eventScore: 0, jammed: 0 };
     this._endlessTimeline = []; this._endlessMarkIdx = 0;
   },
+  resetEndlessAdaptiveHp() {
+    const c = CONFIG.endless.dynamicHp || {}, start = c.startTime || 300, interval = c.interval || 60;
+    this._endlessAdaptiveHp = { next: start + interval, damage: [], enemyLives: [], enemyFloor: 0, bossFloor: 0, pending: false };
+  },
   endlessTelemetryMarks() { return [60, 120, 180, 300]; },
   endlessTelemetrySnapshot(t) {
     const s = this._endlessStats, p = this.player, hp = p && p.maxHp ? Math.round(p.hp / p.maxHp * 100) : 0;
@@ -471,6 +485,58 @@ const game = {
   recordEndlessPressure(dt) {
     if (!this.endless || !this._endlessStats || !this.player) return;
     if (this.jamFactor(this.player.x, this.player.y) > 1) this._endlessStats.jammed += dt;
+  },
+  recordEndlessPlayerDamage(amount) {
+    const c = CONFIG.endless.dynamicHp || {}, a = this._endlessAdaptiveHp;
+    if (!this.endlessDynamicHpActive() || !a || this._endlessT < (c.startTime || 300) || amount <= 0) return;
+    a.damage.push({ t: this._endlessT, d: amount });
+  },
+  recordEndlessEnemyLife(e) {
+    const c = CONFIG.endless.dynamicHp || {}, a = this._endlessAdaptiveHp;
+    if (!this.endlessDynamicHpActive() || !a || this._endlessT < (c.startTime || 300) || e.isBoss || e._endlessSpawnT == null) return;
+    a.enemyLives.push({ t: this._endlessT, life: Math.max(0, this._endlessT - e._endlessSpawnT) });
+  },
+  recordEndlessBossDeath(b) {
+    const c = CONFIG.endless.dynamicHp || {}, a = this._endlessAdaptiveHp, start = c.startTime || 300, target = c.bossTargetLife || 60;
+    if (!this.endlessDynamicHpActive() || !a || this._endlessT < start || b._endlessSpawnT == null) return;
+    this._endlessBossT = Math.max(this._endlessBossT, c.bossMinGap || 10);
+    const life = Math.max(1, this._endlessT - b._endlessSpawnT);
+    if (life >= target) return;
+    const dr = Math.max(b._endlessDr || 0, this.endlessBossDamageReductionBoost());
+    const effectiveHp = Math.max(b._endlessEffectiveHp || 0, b.maxHp / Math.max(0.1, 1 - dr));
+    const floor = Math.round(effectiveHp * target / life);
+    if (floor > a.bossFloor) { a.bossFloor = floor; a.pending = true; }
+  },
+  endlessBossHpFloor(dr = 0) {
+    const floor = this._endlessAdaptiveHp && this._endlessAdaptiveHp.bossFloor || 0;
+    return floor > 0 ? Math.round(floor * Math.max(0.1, 1 - dr)) : 0;
+  },
+  updateEndlessDynamicHp() {
+    const c = CONFIG.endless.dynamicHp || {}, a = this._endlessAdaptiveHp, interval = c.interval || 60;
+    if (!this.endlessDynamicHpActive() || !a || this._endlessT < a.next) return;
+    while (a.next <= this._endlessT) a.next += interval;
+    const since = this._endlessT - interval;
+    a.damage = a.damage.filter(x => x.t >= since);
+    a.enemyLives = a.enemyLives.filter(x => x.t >= since);
+    const sample = a.enemyLives.length, fast = a.enemyLives.filter(x => x.life < (c.enemyLife || 3)).length;
+    const dps = a.damage.reduce((sum, x) => sum + x.d, 0) / interval;
+    const reasons = [];
+    // ponytail: one rolling DPS window is enough; split per weapon only if balance data needs it.
+    if (sample >= (c.enemyMinSamples || 10) && fast / sample >= (c.enemyFailRatio || 0.9) && dps > 0) {
+      const floor = Math.round(dps * (c.enemyTargetLife || 2));
+      if (floor > a.enemyFloor) { a.enemyFloor = floor; reasons.push("小怪装甲+" + floor); }
+    }
+    if (a.pending) { a.pending = false; reasons.push("Boss装甲校准"); }
+    if (reasons.length) this.rewardEndlessDynamicHp(reasons);
+  },
+  rewardEndlessDynamicHp(reasons) {
+    const c = CONFIG.endless.dynamicHp || {}, gain = Math.round((c.score || 3000) * this.threatScoreMult()), p = this.player || { x: CONFIG.WIDTH / 2, y: CONFIG.HEIGHT - 120 };
+    this.score += gain;
+    if (this._endlessStats) { this._endlessStats.events++; this._endlessStats.eventClears++; this._endlessStats.eventScore += gain; this._endlessStats.dynamicHpEvents = (this._endlessStats.dynamicHpEvents || 0) + 1; }
+    this._endlessEventsSeen.push("动态装甲校准");
+    this.banner("动态装甲校准", reasons.join(" / ") + "  +" + gain);
+    this.floats.push(new FloatText(p.x, p.y - 86, "动态校准 +" + gain, "#ffd43b"));
+    Sound.powerup();
   },
   recordChallengeSplits() {
     const marks = this.challengeSplitMarks();
@@ -726,7 +792,9 @@ const game = {
     const late = this._endlessT >= boostTime
       ? (boostMult || 3) * Math.pow(2, (this._endlessT - boostTime) / (doubleInterval || 20))
       : base;
-    return Math.max(base, late) * (1 + this.endlessEventValue("enemyHpMult", 0));
+    let mult = Math.max(base, late);
+    if (this.endlessDynamicHpActive() && e.enemyHpLateTime != null && this._endlessT > e.enemyHpLateTime) mult *= Math.pow(2, (this._endlessT - e.enemyHpLateTime) / (e.enemyHpLateDoubleInterval || e.enemyHpDoubleInterval || 120));
+    return mult * (1 + this.endlessEventValue("enemyHpMult", 0)) * 0.5;
   },
   endlessEnemyHpFloor() {
     if (!this.endless) return 0;
@@ -745,7 +813,9 @@ const game = {
     } else {
       floor = target * Math.pow(2, (this._endlessT - targetTime) / (e.enemyHpFloorDoubleInterval || 180));
     }
-    return Math.round(Math.min(e.enemyHpFloorMax || floor, floor));
+    if (this.endlessDynamicHpActive() && e.enemyHpLateTime != null && this._endlessT > e.enemyHpLateTime) floor *= Math.pow(2, (this._endlessT - e.enemyHpLateTime) / (e.enemyHpFloorLateDoubleInterval || e.enemyHpFloorDoubleInterval || 180));
+    const capped = Math.min(e.enemyHpFloorMax || floor, floor), adaptive = this._endlessAdaptiveHp && this._endlessAdaptiveHp.enemyFloor || 0;
+    return Math.round(Math.max(capped, adaptive) * 0.5);
   },
   endlessBossHpMult(n = this._endlessBossN) {
     const cfg = CONFIG.endless.boss || {};
@@ -755,7 +825,8 @@ const game = {
   endlessBossDamageReduction(n = this._endlessBossN) {
     if (this.endless && !this.endlessLite && this.activeEndlessDiff().key === "normal") return 0;
     const cfg = CONFIG.endless.boss || {};
-    return n <= 0 ? 0 : Math.min(cfg.drMax || 0.5, (cfg.drStart || 0.2) + Math.max(0, n - 1) * (cfg.drStep || 0.1));
+    const base = n <= 0 ? 0 : Math.min(cfg.drMax || 0.5, (cfg.drStart || 0.2) + Math.max(0, n - 1) * (cfg.drStep || 0.1));
+    return Math.max(base, this.endlessBossDamageReductionBoost());
   },
   shipWeaponValue(prop, fallback) {
     const b = ((this.player && this.player.ship) || this.ship).weaponBias || {};
@@ -1488,11 +1559,16 @@ const game = {
       b.maxHp = Math.round(b.maxHp * mult); b.hp = b.maxHp;
       if (!this.endlessLite) this.applyEndlessBossAffix(b, this.pickEndlessBossAffix(cfg.affixes || []));   // GG:经典无尽没有词缀系统,普通BOSS车轮战
       b._endlessDr = this.endlessBossDamageReduction();
+      const floor = !this.endlessLite ? this.endlessBossHpFloor(b._endlessDr) : 0;
+      if (floor > b.maxHp) { b.maxHp = floor; b.hp = b.maxHp; }
+      b._endlessSpawnT = this._endlessT;
+      b._endlessEffectiveHp = b.maxHp / Math.max(0.1, 1 - (b._endlessDr || 0));
     }
     this.enemies.push(b); this.boss = b; this.warningTimer = 2.2; this.showDialogue(this.bossDisplayName(b), b.def.taunt, 3.8); return b;
   },
   pickEndlessBossAffix(affixes) {
     const list = affixes || [], recent = this._endlessRecentBossAffixes || [], fresh = list.filter(a => !recent.includes(a.key));
+    if (this.endlessDynamicStarted()) { const command = list.find(a => a.key === "eliteCommand"); if (command) return command; }
     return this.pick(fresh.length ? fresh : list);
   },
   bossDisplayName(b) { return b && b.affix ? b.affix.name + "·" + b.def.name : b.def.name; },
@@ -1560,8 +1636,10 @@ const game = {
     for (let i = 0; i < count; i++) {
       const side = i % 2 ? 1 : -1, lane = Math.ceil((i + 1) / 2);
       const x = clamp(b.x + side * (b.radius + r + 18 + lane * 18), r + 16, CONFIG.WIDTH - r - 16);
-      const e = pools.enemy.get(type, x, 0, cfg.move || "swoop", a.elite || null);
+      const e = pools.enemy.get(type, x, 0, a.holdTop ? "orbit" : (cfg.move || "swoop"), a.elite || null);
       if (!cfg.fromBottom) e.y = Math.max(-r, b.y + b.radius * 0.25 - made * 14);
+      if (a.holdTop) { e.y = 92 + made * 42; e.baseY = e.y; e.move = "orbit"; e.mp = CONFIG.moves.orbit || {}; e.speed = 0; e._entered = true; }
+      if (a.hpPct && b.maxHp) { e.hp = e.maxHp = Math.round(b.maxHp * a.hpPct); e.eliteShield = 0; e.eliteShieldMax = 0; e._bossEliteDr = 0.5; e._bossEliteMinLifeT = this._endlessT + 10; }
       this.enemies.push(e); made++;
       this.floats.push(new FloatText(e.x, e.y - e.radius, a.name + "僚机", a.color));
     }
@@ -1782,7 +1860,7 @@ const game = {
   useSpecialShield() {
     const s = CONFIG.special;
     this.player.heal(this.player.maxHp * s.healOnShield);
-    this.player.shieldHp = s.shieldHp; this.player.shieldMax = s.shieldHp; this.player.shieldTimer = s.shieldDur;
+    this.player.shieldHp = s.shieldHp; this.player.shieldMax = s.shieldHp; this.player.shieldTimer = s.shieldDur; this.player.shieldHits = s.shieldHits || 2;
     this.burst(this.player.x, this.player.y, "#38d9a9", 22, 220); this.spawnShockwave(this.player.x, this.player.y, this.player.radius * 2.4, "#38d9a9");
   },
   // 侦查型:长时间隐身免伤(见 Player.takeDamage / Player._drawStealthShimmer),不清场也不加防御,纯靠"躲开这一段"
@@ -1797,6 +1875,7 @@ const game = {
 
   onEnemyKilled(e, allowDrop = true, byBomb = false) {
     if (this._endlessStats) { this._endlessStats.kills++; if (e.elite) this._endlessStats.eliteKills = (this._endlessStats.eliteKills || 0) + 1; if (e.isBoss) this._endlessStats.bossKills++; }
+    if (this.endless && !this.endlessLite) { if (e.isBoss) this.recordEndlessBossDeath(e); else this.recordEndlessEnemyLife(e); }
     let gained;
     if (byBomb) { gained = Math.round(e.score * CONFIG.scoring.bombKillMult); }              // 炸弹/必杀清兵:不涨连击、分数打折
     else { this.combo++; this.comboTimer = CONFIG.combo.timeout * (this.player ? this.player.ship.comboTimeoutMult : 1); this.maxCombo = Math.max(this.maxCombo, this.combo); gained = Math.round(e.score * this.comboMult() * this.threatScoreMult()); this.addThreat(e.isBoss ? CONFIG.threat.bossKillGain : CONFIG.threat.killGain); }
@@ -1866,12 +1945,13 @@ const game = {
     return this.player.power >= CONFIG.powerup.chipMinPower;
   },
   chooseDrop() {
-    const w = this.endless ? CONFIG.powerup.endlessWeights : CONFIG.powerup.weights;
+    const w = this.endless ? CONFIG.powerup.endlessWeights : CONFIG.powerup.weights, p = this.player, fullMult = CONFIG.powerup.fullWeightMult || 0.2;
     const kinds = ["power", "heal", "bomb", "wing", "chip"].filter(k => this.canDrop(k));
-    const total = kinds.reduce((s, k) => s + (w[k] || 0), 0);
+    const weight = k => (w[k] || 0) * (p && ((k === "power" && p.power >= CONFIG.player.maxPower) || (k === "wing" && p.wings >= CONFIG.wingMax)) ? fullMult : 1);
+    const total = kinds.reduce((s, k) => s + weight(k), 0);
     if (total <= 0) return "heal";
     let r = this.rng() * total;
-    for (const k of kinds) { if (r < (w[k] || 0)) return k; r -= w[k] || 0; }
+    for (const k of kinds) { const wk = weight(k); if (r < wk) return k; r -= wk; }
     return kinds[kinds.length - 1];
   },
   grantOverflowScore(color = "#ffd43b", kind = "reward", label = "满额奖励") {
