@@ -23,6 +23,7 @@ class Player {
     this.invulnTimer = 0; this._flameTimer = 0;   // RR:引擎尾焰粒子发射计时
     // X4:机型专属必杀状态——护盾(防御型)/隐身(侦查型)。攻击型必杀(全屏重伤)/平衡型必杀(冲击波)不需要常驻状态,现开现用。
     this.shieldHp = 0; this.shieldMax = 0; this.shieldTimer = 0; this.shieldHits = 0; this.stealthTimer = 0;
+    this.cannonMode = false;   // MO:双形态机——false 普通形态 / true 大炮形态(useSpecialMorph 切换)
   }
   update(dt) {
     const c = CONFIG.player;
@@ -54,9 +55,12 @@ class Player {
     if (this._flameTimer <= 0) { this._flameTimer = 0.03; game.spawnEngineFlame(this.x, this.y + 11); }
     this._fireTimer -= dt;
     if (this._fireTimer <= 0) {
-      this._fireTimer = this.fireInterval * game.mainGunCooldownMult();
+      // MO:大炮形态——整个主炮循环放慢到 10%(fireIntervalMult),普通弹幕替换为单发贯穿能量炮弹
+      const morph = this.cannonMode ? this.ship.morph : null;
+      this._fireTimer = this.fireInterval * game.mainGunCooldownMult() * (morph ? morph.fireIntervalMult : 1);
       const pattern = CONFIG.weapon[clamp(this.power, 1, c.maxPower)];
-      for (const s of pattern) { const rad = s.deg * DEG; game.spawnPlayerBullet(this.x + s.ox, this.y - this.radius, Math.sin(rad) * c.bulletSpeed, -Math.cos(rad) * c.bulletSpeed); }
+      if (morph) game.spawnPlayerBullet(this.x, this.y - this.radius, 0, -(morph.bulletSpeed || c.bulletSpeed), "cannon");
+      else for (const s of pattern) { const rad = s.deg * DEG; game.spawnPlayerBullet(this.x + s.ox, this.y - this.radius, Math.sin(rad) * c.bulletSpeed, -Math.cos(rad) * c.bulletSpeed); }
       for (let i = 0; i < this.wings; i++) game.spawnPlayerBullet(this.x + wingOffsetX(i), this.y + 4, 0, -c.bulletSpeed, "wing");   // 僚机直射(任意数量排布)
       const side = game.bonusStacks("sideCannons"), sideCfg = CONFIG.bonuses.sideCannons;
       for (let i = 1, n = Math.min(side, sideCfg.maxPairs); i <= n; i++) {
@@ -171,8 +175,8 @@ class Player {
     const fl = 11 + Math.sin(game.titleT * 28) * 4;
     ctx.fillStyle = "#ffe066"; ctx.beginPath(); ctx.moveTo(x - 5, y + 11); ctx.lineTo(x + 5, y + 11); ctx.lineTo(x, y + 11 + fl); ctx.closePath(); ctx.fill();
     ctx.fillStyle = "#ff922b"; ctx.beginPath(); ctx.moveTo(x - 3, y + 11); ctx.lineTo(x + 3, y + 11); ctx.lineTo(x, y + 11 + fl * 0.6); ctx.closePath(); ctx.fill();
-    // X:机身按 ship.bodyShape 分派专属剪影,整体按 radiusMult 缩放
-    drawShipBody(ctx, x, y, this.ship);
+    // X:机身按 ship.bodyShape 分派专属剪影,整体按 radiusMult 缩放;MO:双形态机按当前形态换机身图
+    drawShipBody(ctx, x, y, this.ship, this.cannonMode ? "cannon" : null);
   }
   // X4:护盾(防御型必杀)——玻璃质感能量泡:径向渐变(边缘亮/中心透)+ 顶部高光弧(立体感)+ 六边形纹理(科技感)+ 随盾量衰减
   _drawShield(ctx) {
@@ -212,9 +216,11 @@ class Player {
 }
 // X:机型专属机身剪影(delta 平衡/twin 攻击/bulk 防御/dart 侦查),按 ship.radiusMult 整体缩放
 // QQ:机翼/机身/座舱全部改渐变(取代纯色)+ 机翼加柔和投影,做出立体感;原始剪影坐标完全不变。
-function drawShipBody(ctx, x, y, ship) {
+function drawShipBody(ctx, x, y, ship, variant = null) {
   const col = ship.color, s = ship.radiusMult || 1, shape = ship.bodyShape || "delta";
-  if (ImageAssets.draw(ctx, ImageAssets.player(ship.key), x, y, 64 * s)) return;
+  // MO:双形态机在大炮形态下换用专属机身图("morph-cannon");找不到形态图时退回普通形态图,再不行才是矢量剪影
+  const img = (variant === "cannon" && ship.morph ? ImageAssets.player(ship.key + "-cannon") : null) || ImageAssets.player(ship.key);
+  if (ImageAssets.draw(ctx, img, x, y, 64 * s)) return;
   ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
   const wingGrad = ctx.createLinearGradient(0, -4, 0, 16);
   wingGrad.addColorStop(0, "#3d4f70"); wingGrad.addColorStop(1, "#161d2b");
@@ -252,10 +258,38 @@ function drawShipBody(ctx, x, y, ship) {
 // DD:constructor 委托给 init(),配合下面的 Pool 复用实例(无尽模式长时间跑,减少高频 new 的 GC 压力)
 class PlayerBullet {
   constructor(x, y, vx, vy, source = "main") { this.init(x, y, vx, vy, source); }
-  init(x, y, vx, vy, source = "main") { this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.source = source; this.radius = CONFIG.bullet.radius; this.pierce = game.bonusValue("pierce", "pierce"); this.hitEnemies = new Set(); this.dead = false; }
-  update(dt) { this.x += this.vx * dt; this.y += this.vy * dt; if (this.y < -20 || this.x < -20 || this.x > CONFIG.WIDTH + 20) this.dead = true; }
+  init(x, y, vx, vy, source = "main") {
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.source = source; this.radius = CONFIG.bullet.radius; this.pierce = game.bonusValue("pierce", "pierce"); this.hitEnemies = new Set(); this.dead = false;
+    // MO:大炮形态能量炮弹——大范围弹道判定 + 无限贯穿(靠 hitEnemies 去重保证每架敌机只结算一次)
+    if (source === "cannon") { const m = game.player && game.player.ship.morph; this.radius = m && m.bulletRadius || 15; this.pierce = 9999; }
+  }
+  update(dt) { this.x += this.vx * dt; this.y += this.vy * dt; if (this.y < -30 || this.x < -30 || this.x > CONFIG.WIDTH + 30) this.dead = true; }
   // QQ:纯色改渐变(弹头亮白、弹尾橙),做出"能量弹"质感;不用 shadowBlur(子弹多,省性能)
   draw(ctx) {
+    if (this.source === "cannon") {   // MO2:高速轨道炮弹重做——旋转六边形护罩 + 拉长双色拖影 + 穿甲弹头高光,配合提速后的速度感做出"未来科技轨道炮"质感
+      const r = this.radius, x = this.x, y = this.y, flick = Math.sin(game.titleT * 34 + x) * 3;
+      const tailLen = r * 4.4;   // 提速后尾焰相应拉长,强化高速感
+      const tail = ctx.createLinearGradient(x, y + r * 0.3, x, y + tailLen + flick);
+      tail.addColorStop(0, "rgba(153,233,242,.9)"); tail.addColorStop(0.4, "rgba(102,217,232,.5)"); tail.addColorStop(0.75, "rgba(132,94,247,.28)"); tail.addColorStop(1, "rgba(132,94,247,0)");
+      ctx.fillStyle = tail; ctx.beginPath(); ctx.moveTo(x - r * 0.4, y + r * 0.25); ctx.lineTo(x + r * 0.4, y + r * 0.25); ctx.lineTo(x, y + tailLen + flick); ctx.closePath(); ctx.fill();
+      // 两道细拖影线,做出"轨道炮能量轨迹"的速度线感
+      ctx.strokeStyle = "rgba(190,246,255,.55)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x - r * 0.85, y); ctx.lineTo(x - r * 0.3, y + tailLen * 0.7); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + r * 0.85, y); ctx.lineTo(x + r * 0.3, y + tailLen * 0.7); ctx.stroke();
+      // 旋转六边形能量护罩,和弹体色系呼应,营造"能量约束场"的科技感
+      ctx.save(); ctx.translate(x, y); ctx.rotate(game.titleT * 6);
+      ctx.strokeStyle = "rgba(132,94,247,.65)"; ctx.lineWidth = 1.4; ctx.beginPath();
+      for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2, px = Math.cos(a) * r * 1.35, py = Math.sin(a) * r * 1.1; if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); }
+      ctx.closePath(); ctx.stroke();
+      ctx.restore();
+      // 弹体核心:白热→青→紫的能量椭圆,前端加尖锐高光模拟穿甲弹头
+      const body = ctx.createRadialGradient(x, y - r * 0.35, r * 0.1, x, y, r);
+      body.addColorStop(0, "#fff"); body.addColorStop(0.4, "#99e9f2"); body.addColorStop(0.75, "#845ef7"); body.addColorStop(1, "rgba(132,94,247,.2)");
+      ctx.fillStyle = body; ctx.beginPath(); ctx.ellipse(x, y, r * 0.68, r * 1.05, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(220,250,255,.9)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(x, y, r * 0.68, r * 1.05, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(x, y - r * 1.1); ctx.lineTo(x - r * 0.22, y - r * 0.55); ctx.lineTo(x + r * 0.22, y - r * 0.55); ctx.closePath(); ctx.fill();
+      return;
+    }
     const g = ctx.createLinearGradient(this.x, this.y - 8, this.x, this.y + 4);
     g.addColorStop(0, "#fff9db"); g.addColorStop(1, "#ffa94d");
     ctx.fillStyle = g; ctx.fillRect(this.x - 2, this.y - 8, 4, 12);
@@ -454,6 +488,7 @@ class Enemy {
     this.move = chosenMove; this.mp = CONFIG.moves[chosenMove] || {}; this._mt = 0; this._entered = false;
     this.phase = "in"; this._ht = 0; this._aimed = false; this.vx = 0; this.vy = 0; this._flash = 0;
     this._carrierSpawn = 0;   // W2:carrier 裂解出的僚机短暂带一圈紫色识别环,归零后就是普通敌机(池复用要清零,不然会带着上一轮的状态)
+    this._cannonHits = 0;     // MO:吃了几发大炮炮弹(每5发追加巨额暴击);池复用必须清零
     this._sniperWarn = 0; this._sniperAim = 0;
     this._supportTimer = (t.repairInterval || 0) * (0.45 + game.rng() * 0.25); this._supportPulse = 0; this._armorPierceFx = 0;
     this._beaconTimer = (t.markInterval || 0) * (0.45 + game.rng() * 0.35); this._beaconWarn = 0; this._beaconX = 0;

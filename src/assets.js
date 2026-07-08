@@ -10,6 +10,8 @@ const ImageAssets = {
       attacker: "assets/images/ships/player-attacker.png",
       defender: "assets/images/ships/player-defender.png",
       scout: "assets/images/ships/player-scout.png",
+      morph: "assets/images/ships/player-morph.png",
+      "morph-cannon": "assets/images/ships/player-morph-cannon.png",   // MO:双形态机的大炮形态机身(切形态时替换普通形态图)
     },
     wingman: {
       balanced: "assets/images/ships/player-wingman-balanced.png",
