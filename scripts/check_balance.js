@@ -33,7 +33,8 @@ const focusedDps = { earlyFull: 88, fourPick: 153, strongRoute: 1075, nearCap: 2
 assert(CONFIG && CONFIG.player && CONFIG.endless, "CONFIG did not load");
 assert.strictEqual(CONFIG.player.maxPower, 8, "player max power should allow one more late-game tier");
 assert.strictEqual(CONFIG.player.maxOvercharge, 8, "player overcharge cap should allow longer endless scaling");
-assert.strictEqual(CONFIG.wingMax, 5, "wing cap should allow stronger endless scaling");
+assert.strictEqual(CONFIG.wingMax, 4, "wing cap should stay even for symmetric formations");
+assert.strictEqual(CONFIG.wingMax % 2, 0, "wing cap should be even for symmetric formations");
 assert(CONFIG.weapon[CONFIG.player.maxPower], "maxPower should have a weapon pattern");
 assert.strictEqual(CONFIG.challenge.rulesVersion, 87, "challenge rules should bump for permanent power scaling");
 assert(CONFIG.endlessDifficulties && CONFIG.endlessDifficulties.normal && CONFIG.endlessDifficulties.hell, "endless difficulties should define normal and hell");
