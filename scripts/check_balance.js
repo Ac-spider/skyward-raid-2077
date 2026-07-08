@@ -35,14 +35,14 @@ assert.strictEqual(CONFIG.player.maxPower, 8, "player max power should allow one
 assert.strictEqual(CONFIG.player.maxOvercharge, 8, "player overcharge cap should allow longer endless scaling");
 assert.strictEqual(CONFIG.wingMax, 6, "wing cap should stay even for symmetric wingmen");
 assert(CONFIG.weapon[CONFIG.player.maxPower], "maxPower should have a weapon pattern");
-assert.strictEqual(CONFIG.challenge.rulesVersion, 88, "challenge rules should bump for five-minute hell scaling");
+assert.strictEqual(CONFIG.challenge.rulesVersion, 89, "challenge rules should bump for lower hell player damage");
 assert(CONFIG.endlessDifficulties && CONFIG.endlessDifficulties.normal && CONFIG.endlessDifficulties.hell, "endless difficulties should define normal and hell");
 assert(CONFIG.endlessDifficulties.normal.enemyHpMult < CONFIG.endlessDifficulties.hell.enemyHpMult, "normal endless enemies should have less HP than hell");
 assert(CONFIG.endlessDifficulties.normal.bossHpMult < CONFIG.endlessDifficulties.hell.bossHpMult, "normal endless bosses should have less HP than hell");
 assert(CONFIG.endlessDifficulties.normal.enemyHpDoubleInterval > CONFIG.endlessDifficulties.hell.enemyHpDoubleInterval, "normal endless enemy HP curve should grow slower than hell");
 assert(CONFIG.endlessDifficulties.normal.dmgDoubleInterval > CONFIG.endless.dmgDoubleInterval, "normal endless bullet damage curve should grow slower than hell");
 assert(CONFIG.endlessDifficulties.hell.playerHpMult > 1 && CONFIG.endlessDifficulties.hell.playerDmgMult > 1, "hell should grant strong player buffs");
-assert.strictEqual(CONFIG.endlessDifficulties.hell.playerDmgMult, 4, "hell player damage should be doubled again");
+assert.strictEqual(CONFIG.endlessDifficulties.hell.playerDmgMult, 2, "hell player damage should start at 2x");
 assert.strictEqual(CONFIG.endlessDifficulties.hell.bossHpMult, 5, "hell endless boss HP should use 5x configured HP");
 assert.strictEqual(CONFIG.endlessDifficulties.hell.bossInvulnDuration, 5, "hell endless boss invulnerability should last 5s");
 assert(CONFIG.endlessDifficulties.hell.bossBulletMult > 1, "hell endless bosses should add more bullets");

@@ -314,7 +314,7 @@ const CONFIG = {
     },
     hell: {
       key: "hell", name: "绝境深潜", color: "#ff6b6b",
-      playerHpMult: 2, playerDmgMult: 4, startWings: 2, startPower: 2,
+      playerHpMult: 2, playerDmgMult: 2, startWings: 2, startPower: 2,
       startingDrafts: 3, draftInterval: 30,
       enemyHpMult: 0.65, bossHpMult: 5, enemySpeedMult: 1.15,
       enemyHpBoostMult: 1.80, enemyHpDoubleInterval: 240,
@@ -398,7 +398,7 @@ const CONFIG = {
       ],
     },
   },
-  challenge: { rulesVersion: 88, splits: [30, 60, 120] },
+  challenge: { rulesVersion: 89, splits: [30, 60, 120] },
 
   combo: { timeout: 2.5, scoreStep: 0.15, maxMult: 5, resetOnHit: false },
 
