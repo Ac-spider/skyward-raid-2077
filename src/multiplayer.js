@@ -48,7 +48,7 @@ const Multiplayer = {
       status: widget.querySelector("[data-mp-status]"),
       code: widget.querySelector("[data-mp-code]"),
     };
-    this._ui.peek.addEventListener("click", () => this.setCollapsed(false));
+    this.initDragPeek();
     this._ui.toggle.addEventListener("click", () => this.setCollapsed(true));
     widget.querySelector("[data-mp-host]").addEventListener("click", () => this.host());
     widget.querySelector("[data-mp-join]").addEventListener("click", () => this.join());
@@ -57,7 +57,46 @@ const Multiplayer = {
     widget.querySelector("[data-mp-clear]").addEventListener("click", () => { this._ui.code.value = ""; });
     widget.querySelector("[data-mp-close]").addEventListener("click", () => this.disconnect());
   },
-
+  // GG2:收起态的信标球可以竖直拖动 + 松手吸附回左/右边缘——用 pointer 事件 + setPointerCapture 实现 1:1 跟手拖拽,
+  //   位置(边+竖直百分比)存进 Settings 持久化,下次进游戏还在玩家上次放的位置。拖动和"点开面板"用位移阈值区分开,
+  //   避免正常点击被误判成一次没有产生位移的拖拽(或者反过来,轻微手抖点击被误判成拖拽从而吞掉展开动作)。
+  initDragPeek() {
+    const peek = this._ui.peek, widget = this._ui.widget, stage = document.getElementById("stage");
+    widget.dataset.side = Settings.data.mpSide || "right";
+    widget.style.top = clamp(Settings.data.mpTop != null ? Settings.data.mpTop : 8, 3, 92) + "%";
+    let dragging = false, moved = false, stageRect = null, startX = 0, startY = 0;
+    peek.addEventListener("pointerdown", (e) => {
+      dragging = true; moved = false; startX = e.clientX; startY = e.clientY;
+      stageRect = stage.getBoundingClientRect();
+      try { peek.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+    peek.addEventListener("pointermove", (e) => {
+      if (!dragging || !stageRect) return;
+      if (!moved) {
+        // GG2:离按下点超过 6px 才判定为拖拽,过滤掉点击自带的手抖位移
+        if (Math.hypot(e.clientX - startX, e.clientY - startY) < 6) return;
+        moved = true; widget.classList.add("mp-dragging");
+      }
+      const topPct = (e.clientY - stageRect.top) / stageRect.height * 100;
+      widget.style.top = clamp(topPct, 3, 92) + "%";
+      widget.dataset.side = (e.clientX - stageRect.left) < stageRect.width / 2 ? "left" : "right";
+    });
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      if (moved) {
+        widget.classList.remove("mp-dragging");
+        Settings.data.mpSide = widget.dataset.side;
+        Settings.data.mpTop = parseFloat(widget.style.top) || 8;
+        Settings.save();
+      } else {
+        this.setCollapsed(false);   // 没有产生位移——当成一次正常点击,展开面板
+      }
+      moved = false;
+    };
+    peek.addEventListener("pointerup", endDrag);
+    peek.addEventListener("pointercancel", endDrag);
+  },
   setCollapsed(collapsed) { this._ui.widget.classList.toggle("collapsed", collapsed); },
   // GG:状态不只点亮右上角小圆点,连收起态的信标圆钮和展开面板里的状态文字也跟着变色(呼应游戏内 HUD 的状态配色:
   // 已连接=青绿 / 连接中等busy态=黄 / 其余=默认蓝),让"缩在边框"的信标本身就能看出联机状态,不用展开才知道

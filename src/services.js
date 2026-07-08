@@ -45,6 +45,10 @@ const Sound = {
   bomb()       { this.noise(0.5, 0.4, 2600); this.tone(120, 0.5, "sawtooth", 0.2, 40); },
   bossDefeat() { this.noise(0.7, 0.35, 1800); this.tone(300, 0.7, "square", 0.2, 60); },
   start()      { this.tone(440, 0.08, "square", 0.12); this.tone(660, 0.10, "square", 0.12); },
+  // MO3:双形态机切换形态——低频"能量鼓胀"噪声扫频 + 一段上滑音,和炸弹/BOSS 击败区分开,听感更"轻盈突变"而非重型爆炸
+  morphShift()  { this.noise(0.3, 0.22, 2200); this.tone(220, 0.22, "triangle", 0.16, 720); },
+  // MO4:大炮形态单发重炮——比普通 shoot() 低沉厚重(低频方波 + 短促下扫噪声),呼应"单发800%伤害"的分量感
+  cannonShot()  { this.tone(140, 0.09, "square", 0.05, 70); this.noise(0.06, 0.05, 900); },
 };
 
 /* =====================================================================
@@ -120,6 +124,7 @@ const Haptics = {
   bomb()       { this.buzz([0, 45, 30, 45]); },
   bossDefeat() { this.buzz([0, 90, 40, 130]); },
   powerup()    { this.buzz(20); },
+  morphShift() { this.buzz([0, 40, 25, 60]); },
 };
 
 /* =====================================================================
@@ -128,7 +133,7 @@ const Haptics = {
 const Settings = {
   key: "kzts_settings",
   // JJ:音效/音乐拆成独立音量+独立开关(原来共用一个 volume,音乐音效没法分别调)
-  data: { sfxVolume: 0.8, musicVolume: 0.7, sound: true, music: true, haptics: true, diff: "normal", endlessDiff: "normal", ship: "balanced", autoNext: false, autoSpecial: false, autoLaser: false, hideWings: false, seenTutorial: false, controlMode: "drag" },
+  data: { sfxVolume: 0.8, musicVolume: 0.7, sound: true, music: true, haptics: true, diff: "normal", endlessDiff: "normal", ship: "balanced", autoNext: false, autoSpecial: false, autoLaser: false, hideWings: false, seenTutorial: false, controlMode: "drag", mpSide: "right", mpTop: 8 },
   load() {
     try {
       const s = JSON.parse(localStorage.getItem(this.key));
@@ -343,6 +348,8 @@ const ACHIEVEMENTS = [
   { id: "endless_5min", icon: "⏱", name: "持久战士", desc: "无尽模式存活 5 分钟" },
   { id: "all_ships",    icon: "🛩", name: "全机长征", desc: "体验过全部机型" },
   { id: "void_slayer",  icon: "🌀", name: "虚空终结者", desc: "击败最终 BOSS「虚空吞噬者」" },
+  // MO5:双形态机(曜迁双影)专属成就——用大炮形态刷,给这台机型一个专门的目标
+  { id: "morph_reckoning", icon: "⇋", name: "曜迁裁决", desc: "单局大炮形态触发 10 次会心暴击" },
 ];
 const Achievements = {
   key: "kzts_achievements",

@@ -18,7 +18,11 @@ html, body {
     position: absolute; left: 0; right: 0; top: 8%; z-index: 5;
     display: flex; justify-content: flex-end; pointer-events: none;
     font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    transition: top .22s ease;
   }
+  /* GG2:收起态的信标现在可以竖直拖动 + 左右吸附——拖动过程中关掉 top 过渡(跟手,不拖尾),松手落位那一下才用回过渡做"吸附"手感 */
+  .mp-widget.mp-dragging { transition: none; }
+  .mp-widget[data-side="left"] { justify-content: flex-start; }
   .mp-widget .mp-panel, .mp-widget .mp-peek { pointer-events: auto; }
   .mp-widget:not(.collapsed) .mp-peek { display: none; }
   .mp-widget.collapsed .mp-panel { display: none; }
@@ -40,6 +44,11 @@ html, body {
   .mp-peek:hover, .mp-peek:active { margin-right: 0; }
   .mp-peek.mp-on { background: radial-gradient(circle at 35% 32%, #79e6c8, rgba(56,217,169,.55) 60%, rgba(20,50,45,.6) 100%); }
   .mp-peek.mp-busy { background: radial-gradient(circle at 35% 32%, #ffe38a, rgba(255,212,59,.55) 60%, rgba(60,50,15,.6) 100%); }
+  /* GG2:贴左边缘时把露出的方向换成向左出血(margin-left 负值),悬停/拖动同样收平;
+     拖动中额外加一圈高亮描边,给玩家"这个可以抓着走"的反馈 */
+  .mp-widget[data-side="left"] .mp-peek { margin-right: 0; margin-left: -14px; }
+  .mp-widget[data-side="left"] .mp-peek:hover, .mp-widget[data-side="left"] .mp-peek:active { margin-left: 0; }
+  .mp-widget.mp-dragging .mp-peek { animation: none; box-shadow: 0 0 0 2px rgba(255,255,255,.55) inset, 0 6px 20px rgba(0,0,0,.5), 0 0 22px rgba(77,171,247,.9); }
   .mp-peek-icon { font-size: 17px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
   .mp-peek-dot {
     position: absolute; top: 2px; right: 3px;
@@ -48,6 +57,7 @@ html, body {
   }
   .mp-peek-dot.on { background: #38d9a9; box-shadow: 0 0 6px #38d9a9; }
   .mp-peek-dot.busy { background: #ffd43b; box-shadow: 0 0 6px #ffd43b; }
+  .mp-widget[data-side="left"] .mp-panel { margin-right: 0; margin-left: 10px; }
   .mp-panel {
     margin-right: 10px;
     width: min(300px, calc(100% - 20px));

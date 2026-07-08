@@ -303,7 +303,9 @@ const CONFIG = {
       specialType: "morph", specialName: "形态切换·爆震波", specialDesc: "切换普通/大炮形态,原地释放向四周扩散的爆震波,清除弹幕并造成伤害",
       // MO2:炮弹重新设计为高速轨道炮弹(见 entities.js PlayerBullet.draw source==="cannon"),bulletSpeed 2000 远快于普通主炮(950),
       //   贯穿判定 + 800% 单发伤害的"重炮"应该一眼看出速度感,原来 500 反而比普通子弹还慢,不符合"炮弹"的直觉
-      morph: { fireIntervalMult: 10, damageMult: 8, critEvery: 5, critMult: 5, bulletRadius: 15, bulletSpeed: 2000, blastDamage: 45, blastSpeed: 640, blastMaxR: 560 } },
+      // MO3:爆震波伤害不再是纯固定值——固定底数 + 敌机当前最大生命值的一定比例,和无尽模式里敌机血量随威胁等级持续膨胀的曲线同步增长,
+      //   避免后期威胁等级拉满后固定 45 点变成聊胜于无的挠痒痒
+      morph: { fireIntervalMult: 10, damageMult: 8, critEvery: 5, critMult: 5, bulletRadius: 15, bulletSpeed: 2000, blastDamage: 45, blastPctMaxHp: 0.05, blastSpeed: 640, blastMaxR: 560 } },
   },
   // A:僚机上限。B:必杀(能量攒满 + 冷却结束才可释放,offensive 全屏重伤;对 BOSS 伤害减半)
   wingMax: 6,
@@ -445,6 +447,8 @@ const TUTORIAL_PAGES = [
   { icon: "💣", title: "炸弹 & 机型技能", lines: ["左下角炸弹图标:清屏 + 短暂无敌", "机型技能要等能量条攒满且冷却结束才能放", "机型技能效果因机型而异(轰炸/护盾/隐身/冲击波),不打人也会随时间缓慢回能"] },
   { icon: "🔥", title: "连击 & 道具", lines: ["连续击杀不中断可以叠连击倍率,越高分越多", "火力满级后继续吃火力会进入超载,强化激光/导弹/追踪弹", "常规关卡每隔几秒会自然刷新一个道具"] },
   { icon: "⚠", title: "BOSS 机制", lines: ["BOSS 血量过低会触发狂暴,攻击变快变猛", "镭射攻击有红色预警,亮起后千万别站在里面", "首页"+ "「📖 图鉴」" + "可以查看所有 BOSS 的详细信息"] },
+  // MO4:双形态机(曜迁双影)机制和其他机型差异太大,新手第一次切到大炮形态很容易把"攻速变慢"误判成中了负面效果,专门补一页说清楚
+  { icon: "⇋", title: "双形态机(曜迁双影)", lines: ["机型技能不是打一下就完的必杀,而是切换普通/大炮两种形态", "切换瞬间原地炸出一圈爆震波,清弹 + 对扫到的敌机造成伤害", "大炮形态:攻速大幅降低,但单发伤害极高、可贯穿多架敌机", "同一架敌机连续吃满 5 发炮弹,会额外触发一次巨额暴击"] },
   { icon: "🛩", title: "机型 & 世界", lines: ["不同机型有独特的被动技能和专属机型技能,首页可左右滑动查看", "关卡地图也能换机型,和首页共用同一个选择", "已开放 5 个世界共 15 关,难度逐步升级"] },
 ];
 
