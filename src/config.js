@@ -418,7 +418,7 @@ const CONFIG = {
   // bombKillMult:炸弹清兵得分折扣(不吃连击)。farmMaxEnemies:刷分在场敌人上限。
   // farmScoreCapMult:刷分总分上限=通关时得分×此倍数,达到则强制结算。
   scoring: { hpCoeff: 0.6, farmInterval: 1.4, bombKillMult: 0.25, farmMaxEnemies: 12, farmScoreCapMult: 2 },
-  bg: { speed: 130 },
+  bg: { speed: 130, baseDim: { 2: 0.36 } },
   themes: [
     { sky1: "#081826", sky2: "#0d3a5c", band1: "rgba(20,80,110,.55)", band2: "rgba(40,130,160,.4)" },
     { sky1: "#241207", sky2: "#5a2e12", band1: "rgba(120,64,28,.55)",  band2: "rgba(170,96,40,.4)" },
