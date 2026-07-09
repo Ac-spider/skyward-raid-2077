@@ -8,17 +8,19 @@ const game = {
   playerBullets: [], homingShots: [], missiles: [], playerLasers: [], enemyBullets: [], enemies: [], powerups: [], particles: [], imageEffects: [], floats: [], lasers: [], gravityPulses: [], shockwaves: [], specialWaves: [], morphBlasts: [],
   score: 0, combo: 0, comboTimer: 0, maxCombo: 0,
   threat: 0, chips: {}, bonuses: {}, _chipCursor: 0, _chipChoices: [], _chipRerolls: 0, _bonusRerolls: 0, _nextChipDraftAt: 0, _bonusKillN: 0, _noHitT: 0, _fieldRepairT: 0, _repairLoopT: 0, _emergencyBarrierCd: 0, _lastStandCd: 0, _leechCd: 0, _startingDrafts: 0, _startingDraftsTotal: 0, _inStartingDraft: false, _chipStats: {}, _bonusStats: {}, _bonusHpGain: {}, _maxThreatLevel: 0,
-  flashTimer: 0, bannerText: "", bannerSub: "", bannerTimer: 0, warningTimer: 0, titleT: 0, _sliderDrag: false,
+  flashTimer: 0, _morphFlashTimer: 0, bannerText: "", bannerSub: "", bannerTimer: 0, warningTimer: 0, titleT: 0, _sliderDrag: false,
   dlgName: "", dlgText: "", dlgTimer: 0,   // P:BOSS 台词
   topScores: [], _recorded: false,
   farming: false, _reached: false, _farmTimer: 0, _farmWaveN: 0, _clearScore: 0, settleResult: null, _resetArmed: false, _settingsReturnState: "title",
   _itemSpawnTimer: 0,   // Q:常规关卡(非无尽)每隔 CONFIG.powerup.autoInterval 秒自动刷新一个道具
   _overflowBatch: {},
   _bombsUsedThisLevel: 0,   // OO:本关用了几个炸弹(给"轻装上阵"成就用)
+  _cannonCritsThisRun: 0, _morphSwitchesThisRun: 0,   // MO5:单局大炮会心暴击/形态切换次数(给"曜迁裁决"成就 + 无尽结算战报用)
   // R:机型选择——弧形展台轮播。_shipScroll 是连续的槽位坐标(可为小数,拖动时随手指走);
   // _shipIdx 是当前吸附到的整数机型下标,松手/点击后 _shipScroll 缓动追向 _shipScrollTarget 直至吸附完成。
   _shipIdx: 0, _shipScroll: 0, _shipScrollTarget: 0, _shipSnapping: false,
   _shipDragStartX: 0, _shipDragStartScroll: 0, _shipDragging: false, _shipDragMoved: false,
+  _shipDragLastScroll: 0, _shipDragLastT: 0, _shipDragVel: 0,   // MO7:甩动惯性——记录滚动速度(槽位/秒),松手后按速度多滑几格再吸附
   _hpTrailRatio: 1,   // AA:血条"残影"—— 掉血后缓慢跟随下降,做视觉反馈
   _lastState: "title", _stateFadeT: 1,   // BB:菜单/覆盖层统一淡入(状态一变就重置为0,0.3秒淡到1)
   _settleAnimT: 0,   // BB:结算类数字滚动动画计时
@@ -27,6 +29,7 @@ const game = {
   _tutorialPage: 0, _tutorialDragStartX: 0, _tutorialDragging: false,   // FF:新手引导翻页
   // MM:地图纵向滚动(为世界数超过一屏做准备)+ 拖动/点击手势区分
   _mapScrollY: 0, _mapDragStartX: 0, _mapDragStartY: 0, _mapDragStartScrollY: 0, _mapDragging: false, _mapDragMoved: false,
+  _mapScrollTarget: null,   // MM2:进图自动定位到最新解锁关卡时的缓动目标(update(dt) 里阻尼追上去,拖动时被打断置 null)
   _mapHighlightId: null, _mapHighlightT: 0,   // MM:从图鉴跳转过来时高亮提示的关卡
   _levelTransX: 0, _levelTransY: 0, _levelTransT: 0,   // NN:进入关卡的聚焦扩散过渡(从点击处展开)
   _worldTransFrom: 1, _worldTransT: 99,   // VV:战斗中背景世界切换的交叉淡入
@@ -56,7 +59,17 @@ const game = {
   rng() { return this._rng ? this._rng() : Math.random(); },
   pick(list) { return list[(this.rng() * list.length) | 0]; },
   toTitle() { this.state = "title"; Music.play(); },
-  toMap() { this.state = "map"; Music.play(); },
+  // MM2:进图自动缓动滚动到"当前最新解锁关卡"所在战区——isUnlocked 对已解锁链条上的每一关都成立,取最大下标就是玩家的推进前沿,
+  //   通关到第四、五战区的老玩家不用再每次手动往下拖
+  toMap() {
+    this.state = "map"; Music.play();
+    let idx = -1;
+    for (let i = 0; i < LEVELS.length; i++) if (!LEVELS[i].endless && this.isUnlocked(i)) idx = i;
+    if (idx >= 0) {
+      const n = this.mapNodePos(idx), vp = this.mapViewportRect();
+      this._mapScrollTarget = clamp(n.y - (vp.top + (vp.bottom - vp.top) / 2), 0, this.mapMaxScroll());
+    } else this._mapScrollTarget = null;
+  },
   // 某关是否解锁:首关或前一关已通关;GG:无尽关卡(endless:true)不占通关链条,永远解锁
   isUnlocked(i) { return LEVELS[i].endless || i === 0 || Progress.isCleared(LEVELS[i - 1].id); },
   // GG:排除无尽关卡后的正式关卡数量 —— 通关自动进入下一关/图鉴网格/"是否末关"判断都要用这个,不能直接用 LEVELS.length
@@ -139,19 +152,29 @@ const game = {
     const slot = this.shipCarouselHitSlot(px, py);
     if (slot != null) { this.beginShipSnap(Math.round(this._shipScroll) + slot); return; }
     this._shipDragStartX = px; this._shipDragStartScroll = this._shipScroll; this._shipDragging = true; this._shipDragMoved = false; this._shipSnapping = false;
+    this._shipDragLastScroll = this._shipScroll; this._shipDragLastT = performance.now(); this._shipDragVel = 0;
   },
-  // 拖动时展台随手指丝滑跟随(连续坐标,不做离散阈值判断)
+  // 拖动时展台随手指丝滑跟随(连续坐标,不做离散阈值判断);同时用指数平滑估算滚动速度,供松手时的甩动惯性用
   shipSelectPointerMove(px) {
     if (!this._shipDragging) return;
     const dx = px - this._shipDragStartX;
     if (Math.abs(dx) > 4) this._shipDragMoved = true;
     this._shipScroll = this._shipDragStartScroll - dx / this.shipCarouselSpacing();
+    const now = performance.now(), dt = (now - this._shipDragLastT) / 1000;
+    if (dt > 0.001) {
+      const instVel = (this._shipScroll - this._shipDragLastScroll) / dt;
+      this._shipDragVel = this._shipDragVel * 0.7 + instVel * 0.3;
+      this._shipDragLastScroll = this._shipScroll; this._shipDragLastT = now;
+    }
   },
-  // 松手:吸附到离当前滚动位置最近的机型,交给 update(dt) 里的缓动追上去
+  // 松手:默认吸附到最近机型;快速甩动时按滚动速度多带 1~3 格再吸附(现代轮播的标配手感),交给 update(dt) 里的缓动追上去
   shipSelectPointerUp() {
     if (!this._shipDragging) return;
     this._shipDragging = false;
-    this.beginShipSnap(Math.round(this._shipScroll));
+    const nearest = Math.round(this._shipScroll);
+    const flingLookahead = 0.15;
+    const projected = Math.abs(this._shipDragVel) > 4 ? Math.round(this._shipScroll + this._shipDragVel * flingLookahead) : nearest;
+    this.beginShipSnap(clamp(projected, nearest - 3, nearest + 3));
   },
 
   // ── Z:首页图鉴(关卡预览网格 + BOSS轮播 + OO:成就标签页,独立于机型选择页的拖拽状态)──
@@ -244,9 +267,10 @@ const game = {
     this.playerBullets = []; this.homingShots = []; this.missiles = []; this.playerLasers = []; this.enemyBullets = []; this.enemies = []; this.powerups = []; this.particles = []; this.imageEffects = []; this.floats = []; this.lasers = []; this.gravityPulses = []; this.shockwaves = []; this.specialWaves = []; this.morphBlasts = [];
     this.score = 0; this.combo = 0; this.comboTimer = 0; this.maxCombo = 0;
     this.resetDepthSystems();
-    this.flashTimer = 0; this.warningTimer = 0; this._recorded = false;
+    this.flashTimer = 0; this._morphFlashTimer = 0; this.warningTimer = 0; this._recorded = false;
     this.farming = false; this._reached = false; this._farmTimer = 0; this._farmWaveN = 0; this.settleResult = null;
     this._itemSpawnTimer = this.itemAutoInterval(); this._overflowBatch = {}; this._hpTrailRatio = 1; this._bombsUsedThisLevel = 0;
+    this._cannonCritsThisRun = 0; this._morphSwitchesThisRun = 0;
     director.begin(LEVELS[i].script);
     input.targetX = CONFIG.player.startX; input.targetY = CONFIG.player.startY;
     Sound.start(); Music.play(); this.banner("STAGE " + LEVELS[i].id, CONFIG.worldIntro[(LEVELS[i].world - 1) % CONFIG.worldIntro.length]);
@@ -277,7 +301,8 @@ const game = {
     this.playerBullets = []; this.homingShots = []; this.missiles = []; this.playerLasers = []; this.enemyBullets = []; this.enemies = []; this.powerups = []; this.particles = []; this.imageEffects = []; this.floats = []; this.lasers = []; this.gravityPulses = []; this.shockwaves = []; this.specialWaves = []; this.morphBlasts = [];
     this.score = 0; this.combo = 0; this.comboTimer = 0; this.maxCombo = 0;
     this.resetDepthSystems();
-    this.flashTimer = 0; this.warningTimer = 0; this._hpTrailRatio = 1; this._overflowBatch = {};
+    this.flashTimer = 0; this._morphFlashTimer = 0; this.warningTimer = 0; this._hpTrailRatio = 1; this._overflowBatch = {};
+    this._cannonCritsThisRun = 0; this._morphSwitchesThisRun = 0;
     this._endlessT = 0; this._endlessSpawnT = CONFIG.endless.spawn.initialDelay; this._endlessBossT = CONFIG.endless.boss.firstDelay; this._endlessBossN = 0;
     this._endlessEvent = null; this._endlessEventTimer = 0; this._endlessEventT = CONFIG.endless.eventInterval * 0.65; this._endlessHazardT = 0; this._endlessEventStartHits = 0; this._endlessEventStartKills = 0; this._endlessEventStartEliteKills = 0; this._endlessEventsSeen = []; this._endlessRecentEvents = []; this._endlessBossAffixesSeen = []; this._endlessRecentBossAffixes = [];
     this.resetEndlessTelemetry();
@@ -478,7 +503,7 @@ const game = {
     const time = Math.floor(this._endlessT);
     // GG:经典无尽关卡结算走独立、更简单的分支 —— 没有挑战码/RIVAL历史,用独立的"无尽关卡榜"而不是无尽挑战的榜,避免强化/事件带来的分数不可比
     if (this.endlessLite) {
-      this.endlessResult = { base: this.score, diffFactor: this.activeDiff.scoreMult, time, final, maxCombo: this.maxCombo };
+      this.endlessResult = { base: this.score, diffFactor: this.activeDiff.scoreMult, time, final, maxCombo: this.maxCombo, morphSwitches: this._morphSwitchesThisRun || 0, morphCrits: this._cannonCritsThisRun || 0 };
       this.endlessTop = EndlessBoardLite.submit(final);
       this.state = "endlessover";
       Achievements.checkEndlessEnd({ time: this._endlessT, maxCombo: this.maxCombo });
@@ -488,7 +513,7 @@ const game = {
     const previousBest = ChallengeHistory.best(this.challengeSeed, this.ship.key);
     const challengeCode = Challenge.encode({ seed: this.challengeSeed, ship: this.ship.key, score: final, time, combo: this.maxCombo, splits, rulesVersion: CONFIG.challenge.rulesVersion });
     const best = ChallengeHistory.submit({ seed: this.challengeSeed, ship: this.ship.key, score: final, time, combo: this.maxCombo, splits, code: challengeCode, daily: this.challengeDaily });
-    this.endlessResult = { base: this.score, diffFactor: this.activeDiff.scoreMult, time, final, maxCombo: this.maxCombo, splits, challengeCode, challengeSeed: this.challengeSeed, challengeMode: this.challengeMode, challengeDaily: this.challengeDaily, target: this.challengeTarget, rival: (typeof RivalInterference !== "undefined") ? RivalInterference.summary(this.rivalInterference) : null, events: this._endlessEventsSeen.slice(), bossAffixes: this._endlessBossAffixesSeen.slice(), chips: Object.assign({}, this._chipStats), bonuses: Object.assign({}, this._bonusStats), bonusHpGain: Object.assign({}, this._bonusHpGain), telemetry: Object.assign({}, this._endlessStats || {}), timeline: this._endlessTimeline.slice(), maxThreat: this._maxThreatLevel, best, newBest: !previousBest || final > previousBest.score };
+    this.endlessResult = { base: this.score, diffFactor: this.activeDiff.scoreMult, time, final, maxCombo: this.maxCombo, splits, challengeCode, challengeSeed: this.challengeSeed, challengeMode: this.challengeMode, challengeDaily: this.challengeDaily, target: this.challengeTarget, rival: (typeof RivalInterference !== "undefined") ? RivalInterference.summary(this.rivalInterference) : null, events: this._endlessEventsSeen.slice(), bossAffixes: this._endlessBossAffixesSeen.slice(), chips: Object.assign({}, this._chipStats), bonuses: Object.assign({}, this._bonusStats), bonusHpGain: Object.assign({}, this._bonusHpGain), telemetry: Object.assign({}, this._endlessStats || {}), timeline: this._endlessTimeline.slice(), maxThreat: this._maxThreatLevel, best, newBest: !previousBest || final > previousBest.score, morphSwitches: this._morphSwitchesThisRun || 0, morphCrits: this._cannonCritsThisRun || 0 };
     this.endlessTop = EndlessBoard.submit(final);
     this.state = "endlessover";
     Achievements.checkEndlessEnd({ time: this._endlessT, maxCombo: this.maxCombo });   // OO
@@ -1927,28 +1952,62 @@ const game = {
     const p = this.player;
     p.cannonMode = !p.cannonMode;
     p._fireTimer = 0;   // 切换后立刻按新形态的节奏开火,不用等旧形态的冷却走完
+    p._morphTransT = 0.25;   // MO4:触发机身的"相位重组"残影过渡(见 Player._drawMorphTransition)
+    this._morphSwitchesThisRun = (this._morphSwitchesThisRun || 0) + 1;   // MO5:单局形态切换计数,给无尽结算战报用
     p.invulnTimer = Math.max(p.invulnTimer, 0.5);   // 切换瞬间给极短无敌,免得形态动画里被贴脸弹打断节奏
     this.floats.push(new FloatText(p.x, p.y - 44, p.cannonMode ? "⇋ 大炮形态" : "⇋ 普通形态", p.ship.color));
     this.morphBlasts.push({ x: p.x, y: p.y, r: 12, dead: false, hitEnemies: new Set() });
     this.spawnShockwave(p.x, p.y, 130, p.ship.color);
     this.burst(p.x, p.y, p.ship.color, 26, 260);
+    this._morphFlashTimer = 0.22; Sound.morphShift(); Haptics.morphShift(); this.addShake(6, 0.18);   // MO3:全屏反馈——白闪+音效+短促震屏,强化切换的冲击感
   },
   // MO:爆震波推进——半径匀速扩散,清掉扫过的所有敌弹,对每架敌机只结算一次伤害,到达最大半径后消亡
   updateMorphBlasts(dt) {
     const m = (this.player && this.player.ship.morph) || {};
-    const speed = m.blastSpeed || 640, maxR = m.blastMaxR || 560, dmg = m.blastDamage || 45;
+    const speed = m.blastSpeed || 640, maxR = m.blastMaxR || 560;
     for (const w of this.morphBlasts) {
       if (w.dead) continue;
       w.r += speed * dt;
+      // 沿波前随机撒能量火花,强化"能量在环上流动"的观感
+      for (let i = 0; i < 2; i++) { const ang = Math.random() * Math.PI * 2; this.spawnHitSpark(w.x + Math.cos(ang) * w.r, w.y + Math.sin(ang) * w.r); }
       for (const b of this.enemyBullets) { if (b.dead || b.kind === "fire" || b.kind === "ice") continue; const dx = b.x - w.x, dy = b.y - w.y; if (dx * dx + dy * dy <= w.r * w.r) { b.dead = true; this.spawnHitSpark(b.x, b.y); } }
       for (const e of this.enemies) {
         if (e.dead || w.hitEnemies.has(e)) continue;
         const dx = e.x - w.x, dy = e.y - w.y, rr = w.r + e.radius;
-        if (dx * dx + dy * dy <= rr * rr) { w.hitEnemies.add(e); if (e.damage(this.playerDamage(dmg, e))) this.onEnemyKilled(e); else this.spawnHitSpark(e.x, e.y); }
+        // MO3:固定底伤 + 敌机当前最大生命值的一定比例,和无尽模式敌机血量随威胁等级增长的曲线挂钩,后期依旧有存在感
+        if (dx * dx + dy * dy <= rr * rr) {
+          w.hitEnemies.add(e);
+          // MO6:非 BOSS 敌机沿波心向外击退(衰减推力,约 30~50px),给"清弹"之外再加一层防御性的喘息窗口;BOSS 免疫,避免打断 BOSS 战节奏
+          if (!e.isBoss) { const d = Math.hypot(dx, dy) || 1; e._kbT = 0.35; e._kbVX = dx / d * 260; e._kbVY = dy / d * 260; }
+          const dmg = (m.blastDamage || 45) + e.maxHp * (m.blastPctMaxHp || 0);
+          if (e.damage(this.playerDamage(dmg, e))) this.onEnemyKilled(e); else this.spawnHitSpark(e.x, e.y);
+        }
       }
       if (w.r >= maxR) w.dead = true;
     }
     pruneDead(this.morphBlasts);
+  },
+  // MO3:爆震波调色——单个连续径向渐变覆盖"波内(拖尾→波前)"与"生命周期(白热刚释放→深蓝已冷却)"两个维度,
+  //   不再用几条离散圆环拼接出颜色变化,同一函数同时供对局内实际爆震波、首页/机型选择的展示动画调用(视觉严格同步)
+  morphBlastMix(a, b, k) { return [0, 1, 2].map(i => Math.round(a[i] + (b[i] - a[i]) * k)); },
+  drawMorphBlastWave(ctx, x, y, r, maxR) {
+    if (r <= 0.5) return;
+    const WHITE = [255, 255, 255], CYAN = [153, 233, 242], BLUE = [64, 130, 220], NAVY = [18, 38, 86];
+    const t = clamp(r / maxR, 0, 1), life = 1 - t;
+    // 波前(领先边缘)颜色:释放瞬间白热,随整体寿命推进先冷却成青蓝、再沉入深蓝
+    const front = this.morphBlastMix(this.morphBlastMix(WHITE, CYAN, clamp(t * 2.6, 0, 1)), BLUE, clamp(t * 1.15, 0, 1));
+    const tail = this.morphBlastMix(CYAN, NAVY, clamp(t * 1.3, 0, 1));   // 拖尾(波内侧)恒比波前更冷、更暗
+    const bandW = Math.min(r, Math.max(r * 0.22, maxR * 0.14));
+    const inner = Math.max(0, r - bandW);
+    ctx.save();
+    const grad = ctx.createRadialGradient(x, y, inner, x, y, r);
+    grad.addColorStop(0, `rgba(${tail[0]},${tail[1]},${tail[2]},0)`);
+    grad.addColorStop(0.55, `rgba(${tail[0]},${tail[1]},${tail[2]},${(0.14 + life * 0.2).toFixed(3)})`);
+    grad.addColorStop(0.88, `rgba(${front[0]},${front[1]},${front[2]},${(0.32 + life * 0.32).toFixed(3)})`);
+    grad.addColorStop(1, `rgba(${front[0]},${front[1]},${front[2]},${(0.5 + life * 0.4).toFixed(3)})`);
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.arc(x, y, inner, 0, Math.PI * 2, true); ctx.fill();
+    ctx.restore();
   },
 
   onEnemyKilled(e, allowDrop = true, byBomb = false) {
@@ -2117,8 +2176,15 @@ const game = {
       if (Math.abs(diff) < 0.002) { this._shipScroll = this._shipScrollTarget; this._shipSnapping = false; }
       else this._shipScroll += diff * Math.min(1, dt * 10);
     }
+    // MM2:关卡地图进图自动定位——阻尼追向"最新解锁关卡"所在战区,和机型展台同一套缓动手感
+    if (this._mapScrollTarget != null) {
+      const diff = this._mapScrollTarget - this._mapScrollY;
+      if (Math.abs(diff) < 0.5) { this._mapScrollY = this._mapScrollTarget; this._mapScrollTarget = null; }
+      else this._mapScrollY += diff * Math.min(1, dt * 6);
+    }
     if (this.state === "paused") return;          // 暂停:冻结一切(逻辑/粒子/计时器)
     if (this.flashTimer > 0) this.flashTimer -= dt;
+    if (this._morphFlashTimer > 0) this._morphFlashTimer -= dt;
     if (this.bannerTimer > 0) this.bannerTimer -= dt;
     if (this.warningTimer > 0) this.warningTimer -= dt;
     if (this._shakeT > 0) this._shakeT -= dt;
@@ -2197,11 +2263,18 @@ const game = {
         if (b.source === "cannon") {
           const m = this.player.ship.morph;
           e._cannonHits = (e._cannonHits || 0) + 1;
-          if (m && e._cannonHits % (m.critEvery || 5) === 0) {
+          const isCrit = m && e._cannonHits % (m.critEvery || 5) === 0;
+          if (isCrit) {
             dmg += Math.round(dmg * (m.critMult || 5));
             this.floats.push(new FloatText(e.x, e.y - e.radius - 12, "会心暴击!", "#ffd43b"));
             this.burst(e.x, e.y, "#ffd43b", 16, 240); this.addShake(5, 0.15);
+            // MO5:单局大炮会心暴击计数——给"曜迁裁决"成就 + 无尽结算战报用
+            this._cannonCritsThisRun = (this._cannonCritsThisRun || 0) + 1;
+            if (this._cannonCritsThisRun >= 10) Achievements.unlock("morph_reckoning");
           }
+          // MO4:贯穿重炮打穿一排敌机不该只有小火花——每次命中加一圈小型冲击环 + 极短 hit-stop,暴击那一发放大一档,做出"重炮"的分量感
+          this.spawnShockwave(e.x, e.y, isCrit ? e.radius * 2.2 : e.radius * 1.3, isCrit ? "#ffd43b" : "#99e9f2");
+          this.hitStop(isCrit ? 0.05 : 0.02);
         }
         if (e.damage(dmg, "bullet")) this.onEnemyKilled(e);
         if (b.pierce > 0) { b.pierce--; continue; }
@@ -2323,14 +2396,10 @@ const game = {
     this.imageEffects.forEach(o => o.draw(ctx));
     this.shockwaves.forEach(o => o.draw(ctx));
     this.specialWaves.forEach(o => o.draw(ctx));
-    // MO:爆震波——双圈能量环(外圈亮边+内圈填充),随扩散半径淡出
-    for (const w of this.morphBlasts) {
-      if (w.dead) continue;
-      const m = (this.player && this.player.ship.morph) || {}, a = clamp(1 - w.r / (m.blastMaxR || 560), 0, 1);
-      ctx.save(); ctx.globalAlpha = 0.25 + a * 0.55;
-      ctx.strokeStyle = "#99e9f2"; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(w.x, w.y, w.r, 0, Math.PI * 2); ctx.stroke();
-      ctx.globalAlpha *= 0.5; ctx.strokeStyle = "#66d9e8"; ctx.lineWidth = 14; ctx.beginPath(); ctx.arc(w.x, w.y, Math.max(0, w.r - 10), 0, Math.PI * 2); ctx.stroke();
-      ctx.restore();
+    // MO3:爆震波——统一走 drawMorphBlastWave(单一连续渐变),和首页/机型选择的展示动画共用同一套调色,视觉严格同步
+    {
+      const m = (this.player && this.player.ship.morph) || {}, maxR = m.blastMaxR || 560;
+      for (const w of this.morphBlasts) { if (!w.dead) this.drawMorphBlastWave(ctx, w.x, w.y, w.r, maxR); }
     }
     this.floats.forEach(o => o.draw(ctx));
     if (this.player) this.player.draw(ctx);
@@ -2346,6 +2415,8 @@ const game = {
       ctx.restore();
     }
     if (this.flashTimer > 0) { ctx.fillStyle = "rgba(255,255,255," + (this.flashTimer / CONFIG.bomb.flash * 0.6) + ")"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT); }
+    // MO3:形态切换的全屏反馈——比炸弹白闪更短、更冷(青色调),避免和炸弹撞视觉又能强化"冲击"感
+    if (this._morphFlashTimer > 0) { ctx.fillStyle = "rgba(153,233,242," + (this._morphFlashTimer / 0.22 * 0.32) + ")"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT); }
     if (this.bannerTimer > 0 && this.state === "playing") {
       ctx.globalAlpha = clamp(this.bannerTimer, 0, 1); ctx.textAlign = "center";
       ctx.fillStyle = "#ffd43b"; ctx.font = "bold 44px 'Segoe UI', sans-serif"; ctx.fillText(this.bannerText, CONFIG.WIDTH / 2, CONFIG.HEIGHT * 0.4);
@@ -2517,6 +2588,8 @@ const game = {
     ctx.fillStyle = "#fff"; ctx.font = "22px 'Segoe UI', sans-serif"; ctx.fillText("存活 " + r.time + " 秒   最高连击 " + r.maxCombo, cx, 300);
     ctx.fillStyle = "#dee2e6"; ctx.font = "20px 'Segoe UI', sans-serif"; ctx.fillText("得分 " + this.easedCount(r.base) + "  × 难度 " + r.diffFactor.toFixed(1), cx, 336);
     ctx.fillStyle = "#fff"; ctx.font = "bold 30px 'Segoe UI', sans-serif"; ctx.fillText("最终得分  " + this.easedCount(r.final, 1.3), cx, 384);
+    // MO5:曜迁双影专属战报——形态切换/会心暴击次数,让这台机型的专属玩法在结算时有回响
+    if (this.ship.specialType === "morph") { ctx.fillStyle = "#66d9e8"; ctx.font = "15px 'Segoe UI', sans-serif"; ctx.fillText("形态切换 " + (r.morphSwitches || 0) + " 次 · 会心暴击 " + (r.morphCrits || 0) + " 次", cx, 408); }
     ctx.fillStyle = "#adb5bd"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("── 无尽关卡榜 ──", cx, 434);
     let hl = false;
     top.forEach((e, i) => { const me = !hl && e.score === r.final; if (me) hl = true; ctx.fillStyle = me ? "#ffd43b" : "#dee2e6"; ctx.font = (me ? "bold " : "") + "17px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + ".   " + e.score + "   " + e.date + (me ? "  ◄" : ""), cx, 464 + i * 28); });
@@ -2593,6 +2666,8 @@ const game = {
     }
     const tele = r.telemetry || {};
     ctx.fillText(fitLine("战况 击杀 " + (tele.kills || 0) + " · 精英 " + (tele.eliteKills || 0) + " · Boss " + (tele.bossKills || 0) + " · 受击 " + (tele.hits || 0) + "(格挡 " + (tele.blocked || 0) + ") · 承伤 " + Math.round(tele.damageTaken || 0) + " · 空域 " + (tele.eventClears || 0) + "/" + (tele.cleanEvents || 0) + (tele.eventFails ? "/失败" + tele.eventFails : "") + " · 干扰 " + Math.round(tele.jammed || 0) + "s · 炸弹 " + (tele.bombs || 0) + " · 选择 " + (tele.picks || 0) + "/" + (tele.drafts || 0), 356), cx, infoY); infoY += 18;
+    // MO5:曜迁双影专属战报——形态切换/会心暴击次数,让这台机型的专属玩法在结算时有回响
+    if (this.ship.specialType === "morph") { ctx.fillStyle = "#66d9e8"; ctx.fillText("曜迁战报 形态切换 " + (r.morphSwitches || 0) + " 次 · 会心暴击 " + (r.morphCrits || 0) + " 次", cx, infoY); ctx.fillStyle = "#adb5bd"; infoY += 18; }
     const timeline = (r.timeline || []).map(m => m.t + "s " + m.score + "分/" + m.kills + "杀/" + (m.elite || 0) + "精英/HP" + m.hp + "%" + (m.jam ? "/干扰" + m.jam + "s" : "")).join(" · ");
     if (timeline && !compactResult) { ctx.fillText(fitLine("节点 " + timeline, 356), cx, infoY); infoY += 22; }
     const boardY = infoY > 418 ? infoY + 16 : 434;
@@ -2672,14 +2747,9 @@ const game = {
   // 展示专用的机身绘制——非双形态机原样绘制;双形态机叠加自动切换 + 冲击波(纯视觉,不涉及任何战斗判定)
   drawShipPreview(ctx, x, y, shipCfg) {
     if (shipCfg.specialType !== "morph") { drawShipBody(ctx, x, y, shipCfg); return; }
+    // MO3:展示用冲击波和对局内实际爆震波共用 drawMorphBlastWave,只是缩小到展示框尺度(maxR 120),颜色/淡出规律完全同步
     const demo = this.shipMorphDemoPhase(this.titleT);
-    if (demo.blastT >= 0) {
-      const maxR = 120, r = demo.blastT * maxR, a = clamp(1 - demo.blastT, 0, 1);
-      ctx.save(); ctx.globalAlpha *= 0.25 + a * 0.55;
-      ctx.strokeStyle = "#99e9f2"; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
-      ctx.globalAlpha *= 0.5; ctx.strokeStyle = "#66d9e8"; ctx.lineWidth = 14; ctx.beginPath(); ctx.arc(x, y, Math.max(0, r - 10), 0, Math.PI * 2); ctx.stroke();
-      ctx.restore();
-    }
+    if (demo.blastT >= 0) { const maxR = 120; this.drawMorphBlastWave(ctx, x, y, demo.blastT * maxR, maxR); }
     drawShipBody(ctx, x, y, shipCfg, demo.cannonMode ? "cannon" : null);
   },
   drawTitle(ctx) {
@@ -2783,18 +2853,32 @@ const game = {
     const statY = info.y + 124;
     sectionHeader("性能", statY);
     // 三条性能条:生命值/射速(越低越快,取反归一化)/机动,统一映射到有对比区分度的区间而不是简单 0-100%
+    // GG:同一套归一化函数按 metric 存一份,浏览非当前使用机型时能算出"当前机型"落在同一条性能条上的位置,叠一个小三角做直观对比
+    const ratioFns = {
+      hp: s => clamp((s.hpMult - 0.5) / 1.1, 0, 1),
+      fire: s => 1 - clamp((s.fireMult - 0.7) / 0.6, 0, 1),
+      lerp: s => clamp(((s.lerpMult || 1) - 0.7) / 0.9, 0, 1),
+    };
     const stats = [
-      { label: "生命值", ratio: clamp((sp.hpMult - 0.5) / 1.1, 0, 1), value: Math.round(sp.hpMult * 100) + "%", color: "#ff6b6b" },
-      { label: "射速", ratio: 1 - clamp((sp.fireMult - 0.7) / 0.6, 0, 1), value: "×" + sp.fireMult.toFixed(2), color: "#4dabf7" },
-      { label: "机动", ratio: clamp(((sp.lerpMult || 1) - 0.7) / 0.9, 0, 1), value: Math.round((sp.lerpMult || 1) * 100) + "%", color: "#38d9a9" },
+      { label: "生命值", metric: "hp", ratio: ratioFns.hp(sp), value: Math.round(sp.hpMult * 100) + "%", color: "#ff6b6b" },
+      { label: "射速", metric: "fire", ratio: ratioFns.fire(sp), value: "×" + sp.fireMult.toFixed(2), color: "#4dabf7" },
+      { label: "机动", metric: "lerp", ratio: ratioFns.lerp(sp), value: Math.round((sp.lerpMult || 1) * 100) + "%", color: "#38d9a9" },
     ];
     let sy = statY + 22;
     stats.forEach(st => {
       ctx.fillStyle = "#adb5bd"; ctx.font = "12px 'Segoe UI', sans-serif"; ctx.fillText(st.label, statX, sy);
       ctx.textAlign = "right"; ctx.fillStyle = "#dee2e6"; ctx.fillText(st.value, statX + statW, sy); ctx.textAlign = "left";
       UI.bar(ctx, statX, sy + 6, statW, 8, st.ratio, UI.shade(st.color, -0.15), st.color, {});
+      if (!selected) {   // 浏览的不是当前使用中的机型时,标出"当前机型"在同一条性能条上的位置,方便一眼看出换机的得失
+        const mx = statX + statW * ratioFns[st.metric](this.ship), my = sy + 6;
+        ctx.save(); ctx.globalAlpha = 0.9; ctx.fillStyle = "#fff";
+        ctx.beginPath(); ctx.moveTo(mx, my - 3); ctx.lineTo(mx - 4, my - 9); ctx.lineTo(mx + 4, my - 9); ctx.closePath(); ctx.fill();
+        ctx.restore();
+      }
       sy += 31;
     });
+    // GG:原来贴在 sy-15 处,和最后一条(机动)性能条只差 2px,字形上沿会盖住绿色条尾——挪到 sy-2,离条底和下一节标题分隔线都留出安全间距
+    if (!selected) { ctx.fillStyle = "rgba(255,255,255,.5)"; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillText("△ 当前使用中机型 · " + this.ship.name, statX, sy - 2); }
 
     // 被动技能:图标框(专属图案)+ 名称/描述
     sy += 22;
@@ -3083,7 +3167,13 @@ const game = {
   // WW:基准 y 从 324 改成 360 —— 324 时世界1的战区名(band.y+18=292)比视口裁剪线(mapViewportRect().top=296)还靠上,
   //   每次绘制都会被 ctx.clip() 切掉,标题永远显示不出来;360 让 band.y(310)留出安全余量,不再被裁剪线咬到。
   mapWorldBandRect(world) { const y = 360 + (world - 1) * 146; return { x: 10, y: y - 50, w: CONFIG.WIDTH - 20, h: 122 }; },
-  mapRowRect(i, y, count = 3) { const w = 102, gap = 14, total = count * w + (count - 1) * gap, x0 = (CONFIG.WIDTH - total) / 2; return { x: x0 + i * (w + gap), y, w, h: 46 }; },
+  // GG:机型增加到 5 个后按钮固定宽度 102 会把整排撑出屏幕(实测左右各溢出 13px);
+  //   改成按可用宽度动态收缩按钮宽度(上限仍是 102,和原来 3/4 个按钮时的观感完全一致),不够放就整体缩小而不是溢出裁切
+  mapRowRect(i, y, count = 3) {
+    const gap = 14, maxW = CONFIG.WIDTH - 40, w = Math.min(102, (maxW - (count - 1) * gap) / count);
+    const total = count * w + (count - 1) * gap, x0 = (CONFIG.WIDTH - total) / 2;
+    return { x: x0 + i * (w + gap), y, w, h: 46 };
+  },
   mapDiffRect(i) { return this.mapRowRect(i, 118, 3); },
   mapShipRect(i) { return this.mapRowRect(i, 192, CONFIG.shipOrder.length); },
   mapBackRect() { return { x: 20, y: 28, w: 90, h: 36 }; },
@@ -3110,6 +3200,7 @@ const game = {
     // MM:节点区域先记一个拖拽起点,松手时(mapPointerUp)再判断这一下到底是"点关卡"还是"拖动滚动"
     const vp = this.mapViewportRect();
     if (py >= vp.top && py <= vp.bottom) {
+      this._mapScrollTarget = null;   // MM2:玩家手动拖动就打断自动定位动画,不跟手指抢主导权
       this._mapDragStartX = px; this._mapDragStartY = py; this._mapDragStartScrollY = this._mapScrollY;
       this._mapDragging = true; this._mapDragMoved = false;
     }
@@ -3143,9 +3234,10 @@ const game = {
     const idx = LEVELS.findIndex(l => l.id === ids[0]);
     if (idx < 0) return;
     this._mapHighlightId = ids[0]; this._mapHighlightT = 3.0;
+    this.toMap();   // MM2:toMap() 会先算一次"最新解锁关卡"的自动定位目标,这里紧接着用显式跳转目标覆盖掉,且直接落位不用缓动(和原来的跳转手感一致)
     const n = this.mapNodePos(idx), vp = this.mapViewportRect();
+    this._mapScrollTarget = null;
     this._mapScrollY = clamp(n.y - (vp.top + (vp.bottom - vp.top) / 2), 0, this.mapMaxScroll());
-    this.toMap();
   },
   // GG:困难难度下地图整体更有压迫感 —— 边缘压暗成暗红色氛围光,世界底板叠一层血红滤色,
   //   BOSS关卡(sub3)和无尽关卡节点额外叠电弧+火焰特效;简单/普通维持原样不受影响
@@ -3870,6 +3962,18 @@ const game = {
       ctx.restore();
     }
     ctx.fillStyle = "#ffe066"; ctx.beginPath(); ctx.moveTo(enX + enW + 20, enY - 3); ctx.lineTo(enX + enW + 14, enY + enH / 2 + 1); ctx.lineTo(enX + enW + 19, enY + enH / 2 + 1); ctx.lineTo(enX + enW + 13, enY + enH + 4); ctx.lineTo(enX + enW + 24, enY + enH / 2 - 3); ctx.lineTo(enX + enW + 18, enY + enH / 2 - 3); ctx.closePath(); ctx.fill();
+    // MO4:双形态机在闪电图标右侧再放一个小剪影,提示这次能量满了会切成哪个形态(炮管=切大炮/机翼=切回普通),
+    //   配合机身上的充能弧,玩家低头就能看懂"下一步会发生什么",不用死记硬背
+    if (this.player.ship.specialType === "morph") {
+      const mx = enX + enW + 38, my = enY + enH / 2, toCannon = !this.player.cannonMode;
+      ctx.save(); ctx.globalAlpha = enFull ? 0.6 + Math.abs(Math.sin(this.titleT * 5)) * 0.4 : 0.45;
+      const mc = toCannon ? "#ffd43b" : "#66d9e8";
+      ctx.strokeStyle = mc; ctx.fillStyle = mc; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(mx, my, 9, 0, Math.PI * 2); ctx.stroke();
+      if (toCannon) { ctx.fillRect(mx - 1.6, my - 6, 3.2, 8); ctx.beginPath(); ctx.arc(mx, my + 3, 2.6, 0, Math.PI * 2); ctx.fill(); }
+      else { ctx.beginPath(); ctx.moveTo(mx, my - 6); ctx.lineTo(mx - 6, my + 5); ctx.lineTo(mx + 6, my + 5); ctx.closePath(); ctx.fill(); }
+      ctx.restore();
+    }
     // X4:就绪时显示机型专属技能名字(而不是统一的"机型技能"),呼应四种机型四套不同效果
     const specName = this.player.ship.specialName || "机型技能";
     ctx.fillStyle = enFull ? "#ffd43b" : "#adb5bd"; ctx.font = "bold 12px 'Segoe UI', sans-serif"; ctx.fillText(enFull ? specName + " · 就绪" : "机型技能", enX, enY + enH + 14);

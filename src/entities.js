@@ -17,29 +17,35 @@ class Player {
     this.energy = 0;             // B:必杀能量 0-100
     this.specialCooldown = 0;    // Q:必杀冷却(秒),能量满 + 冷却结束才可释放
     this.invulnAmount = game.activeDiff.invuln;
-    this._fireTimer = 0; this._homingTimer = 0; this._laserTimer = 0; this._missileTimer = 0;
+    this._fireTimer = 0; this._fireIntervalCur = this.fireInterval; this._homingTimer = 0; this._laserTimer = 0; this._missileTimer = 0;
     this.charge = 0; this.charging = false; this.chargeCooldown = 0;
     this.slowTimer = 0; this.slowMult = 1;
     this.invulnTimer = 0; this._flameTimer = 0;   // RR:引擎尾焰粒子发射计时
     // X4:机型专属必杀状态——护盾(防御型)/隐身(侦查型)。攻击型必杀(全屏重伤)/平衡型必杀(冲击波)不需要常驻状态,现开现用。
     this.shieldHp = 0; this.shieldMax = 0; this.shieldTimer = 0; this.shieldHits = 0; this.stealthTimer = 0;
     this.cannonMode = false;   // MO:双形态机——false 普通形态 / true 大炮形态(useSpecialMorph 切换)
+    this._morphTransT = 0;   // MO4:形态切换后的"相位重组"残影过渡剩余时间(useSpecialMorph 触发,见 _drawMorphTransition)
+    this._recoilT = 0;   // MO6:大炮开火后坐力动画剩余时间
   }
   update(dt) {
     const c = CONFIG.player;
     if (this.slowTimer > 0) { this.slowTimer -= dt; if (this.slowTimer <= 0) this.slowMult = 1; }
     const moveSlow = this.slowTimer > 0 ? this.slowMult : 1;
+    // 机动性手感曲线:对 lerpMult 取平方放大差异——低于 1 的机型明显迟滞(0.85→0.72),高于 1 的明显跟手(1.5→2.25)
+    const agility = Math.pow(this.ship.lerpMult || 1, 2);
     if (Settings.data.controlMode === "joystick") {   // KK:定速推杆,而非贴向触点位置
-      const speed = CONFIG.joystick.maxSpeed * (this.ship.lerpMult || 1) * moveSlow;
+      const speed = Math.min(CONFIG.joystick.maxSpeed * agility, 900) * moveSlow;   // 封顶 900px/s,防止高机动机型贴边失控
       this.x += input.joyDX * speed * dt; this.y += input.joyDY * speed * dt;
     } else {
-      const lerp = c.lerp * (this.ship.lerpMult || 1) * moveSlow;
+      const lerp = Math.min(0.92, c.lerp * agility * moveSlow);   // 封顶防止高机动机型直接瞬移/过冲
       this.x += (input.targetX - this.x) * lerp; this.y += (input.targetY - this.y) * lerp;
     }
     const pull = game.pullVectorAt(this.x, this.y);
     this.x += pull.x * dt; this.y += pull.y * dt;
     this.x = clamp(this.x, this.radius, CONFIG.WIDTH - this.radius); this.y = clamp(this.y, this.radius, CONFIG.HEIGHT - this.radius);
     if (this.invulnTimer > 0) this.invulnTimer -= dt;
+    if (this._morphTransT > 0) this._morphTransT -= dt;
+    if (this._recoilT > 0) this._recoilT -= dt;   // MO6:大炮开火后坐力动画剩余时间(见 update() 里 spawnPlayerBullet("cannon") 那一支和 _drawBody 的位移计算)
     if (this.specialCooldown > 0) this.specialCooldown -= dt;
     if (this.chargeCooldown > 0) this.chargeCooldown -= dt;
     if (!this.charging && game.chargeReady()) game.startCharge();
@@ -58,8 +64,9 @@ class Player {
       // MO:大炮形态——整个主炮循环放慢到 10%(fireIntervalMult),普通弹幕替换为单发贯穿能量炮弹
       const morph = this.cannonMode ? this.ship.morph : null;
       this._fireTimer = this.fireInterval * game.mainGunCooldownMult() * (morph ? morph.fireIntervalMult : 1);
+      this._fireIntervalCur = this._fireTimer;   // MO3:大炮形态充能弧用——记下这一发的完整循环时长,供 draw() 算充能进度
       const pattern = CONFIG.weapon[clamp(this.power, 1, c.maxPower)];
-      if (morph) game.spawnPlayerBullet(this.x, this.y - this.radius, 0, -(morph.bulletSpeed || c.bulletSpeed), "cannon");
+      if (morph) { game.spawnPlayerBullet(this.x, this.y - this.radius, 0, -(morph.bulletSpeed || c.bulletSpeed), "cannon"); this._recoilT = 0.1; }   // MO6:单发重炮的后坐力顿挫,见 _drawBody
       else for (const s of pattern) { const rad = s.deg * DEG; game.spawnPlayerBullet(this.x + s.ox, this.y - this.radius, Math.sin(rad) * c.bulletSpeed, -Math.cos(rad) * c.bulletSpeed); }
       for (let i = 0; i < this.wings; i++) game.spawnPlayerBullet(this.x + wingOffsetX(i), this.y + 4, 0, -c.bulletSpeed, "wing");   // 僚机直射(任意数量排布)
       const side = game.bonusStacks("sideCannons"), sideCfg = CONFIG.bonuses.sideCannons;
@@ -73,7 +80,7 @@ class Player {
         game.spawnPlayerBullet(this.x - 18, this.y, -Math.sin(a) * c.bulletSpeed, -Math.cos(a) * c.bulletSpeed);
         game.spawnPlayerBullet(this.x + 18, this.y, Math.sin(a) * c.bulletSpeed, -Math.cos(a) * c.bulletSpeed);
       }
-      Sound.shoot();
+      if (morph) Sound.cannonShot(); else Sound.shoot();   // MO4:大炮形态单独配一记低频重炮音效,和普通哔声区分出"分量感"
     }
     this.updateSecondaries(dt);
   }
@@ -175,8 +182,45 @@ class Player {
     const fl = 11 + Math.sin(game.titleT * 28) * 4;
     ctx.fillStyle = "#ffe066"; ctx.beginPath(); ctx.moveTo(x - 5, y + 11); ctx.lineTo(x + 5, y + 11); ctx.lineTo(x, y + 11 + fl); ctx.closePath(); ctx.fill();
     ctx.fillStyle = "#ff922b"; ctx.beginPath(); ctx.moveTo(x - 3, y + 11); ctx.lineTo(x + 3, y + 11); ctx.lineTo(x, y + 11 + fl * 0.6); ctx.closePath(); ctx.fill();
+    // MO4:形态切换的"相位重组"残影——画在实际机身之前,让新形态的机身从一圈发光残影里"收缩成形"
+    if (this._morphTransT > 0) this._drawMorphTransition(ctx);
+    // MO6:大炮开火后坐力——机身沿 sin 曲线顿挫下沉再弹回(0.1s),只偏移剪影本身,尾焰/僚机仍锚在原位,做出"单发有分量"的手感
+    const recoilY = this._recoilT > 0 ? Math.sin(clamp(1 - this._recoilT / 0.1, 0, 1) * Math.PI) * 4 : 0;
+    if (recoilY) { ctx.save(); ctx.translate(0, recoilY); }
     // X:机身按 ship.bodyShape 分派专属剪影,整体按 radiusMult 缩放;MO:双形态机按当前形态换机身图
     drawShipBody(ctx, x, y, this.ship, this.cannonMode ? "cannon" : null);
+    if (this.cannonMode) this._drawCannonChargeArc(ctx);
+    if (recoilY) ctx.restore();
+  }
+  // MO4:切换形态瞬间——机身外先炸一下白光,随后一圈青色残影从 1.4 倍缩到 1 倍并淡出,呼应"曜迁"(相位重组)而不是硬切图
+  _drawMorphTransition(ctx) {
+    const dur = 0.25, t = clamp(1 - this._morphTransT / dur, 0, 1), x = this.x, y = this.y;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    // 白光爆闪,只在最初几帧明显(三次方衰减)
+    ctx.globalAlpha = Math.pow(1 - t, 3) * 0.75;
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(x, y, this.radius * 1.5, 0, Math.PI * 2); ctx.fill();
+    // 缩放残影——1.4 倍缩到 1 倍,新形态机身在残影里"收缩成形"
+    ctx.globalAlpha = (1 - t) * 0.55;
+    const scale = 1.4 - 0.4 * t;
+    ctx.translate(x, y); ctx.scale(scale, scale); ctx.translate(-x, -y);
+    drawShipBody(ctx, x, y, this.ship, this.cannonMode ? "cannon" : null);
+    ctx.restore();
+  }
+  // MO3:大炮形态充能弧——机身下方一圈从 12 点方向顺时针推进的细弧,填满即代表下一发炮弹已就绪,
+  //   缓解"攻速降到10%"带来的等待感,让玩家能预判开火时机而不是干等
+  _drawCannonChargeArc(ctx) {
+    const x = this.x, y = this.y, r = this.radius + 10, total = this._fireIntervalCur || 1;
+    const ratio = clamp(1 - this._fireTimer / total, 0, 1), ready = ratio >= 0.999;
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.12)"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+    const start = -Math.PI / 2, end = start + Math.PI * 2 * ratio;
+    ctx.strokeStyle = ready ? "#ffd43b" : this.ship.color; ctx.lineWidth = 3; ctx.lineCap = "round";
+    ctx.globalAlpha = ready ? 0.75 + Math.sin(game.titleT * 10) * 0.25 : 0.85;
+    ctx.beginPath(); ctx.arc(x, y, r, start, end); ctx.stroke();
+    ctx.restore();
   }
   // X4:护盾(防御型必杀)——玻璃质感能量泡:径向渐变(边缘亮/中心透)+ 顶部高光弧(立体感)+ 六边形纹理(科技感)+ 随盾量衰减
   _drawShield(ctx) {
@@ -489,6 +533,7 @@ class Enemy {
     this.phase = "in"; this._ht = 0; this._aimed = false; this.vx = 0; this.vy = 0; this._flash = 0;
     this._carrierSpawn = 0;   // W2:carrier 裂解出的僚机短暂带一圈紫色识别环,归零后就是普通敌机(池复用要清零,不然会带着上一轮的状态)
     this._cannonHits = 0;     // MO:吃了几发大炮炮弹(每5发追加巨额暴击);池复用必须清零
+    this._kbT = 0; this._kbVX = 0; this._kbVY = 0;   // MO6:爆震波击退——衰减式推力,池复用必须清零(见 game.updateMorphBlasts / Enemy.update)
     this._sniperWarn = 0; this._sniperAim = 0;
     this._supportTimer = (t.repairInterval || 0) * (0.45 + game.rng() * 0.25); this._supportPulse = 0; this._armorPierceFx = 0;
     this._beaconTimer = (t.markInterval || 0) * (0.45 + game.rng() * 0.35); this._beaconWarn = 0; this._beaconX = 0;
@@ -552,12 +597,23 @@ class Enemy {
       this.y += this.speed * dt;   // straight
     }
   }
+  // MO6:爆震波击退——衰减式推力,叠加在 applyMove 之后。sine/zigzag/orbit 类型每帧都会从 baseX 重新算 x,
+  //   单纯推 x 下一帧就被吃回去,所以这几种额外把推力写回 baseX,让振荡中心跟着一起偏移才看得出效果。
+  updateKnockback(dt) {
+    if (this._kbT <= 0) return;
+    const k = clamp(this._kbT / 0.35, 0, 1), dx = this._kbVX * k * dt, dy = this._kbVY * k * dt;
+    this.x = clamp(this.x + dx, this.radius, CONFIG.WIDTH - this.radius);
+    this.y += dy;
+    if (this.move === "sine" || this.move === "zigzag" || this.move === "orbit") this.baseX = clamp(this.baseX + dx, this.radius, CONFIG.WIDTH - this.radius);
+    this._kbT -= dt;
+  }
   update(dt) {
     this._mt += dt;
     if (this._flash > 0) this._flash -= dt;
     if (this._carrierSpawn > 0) this._carrierSpawn -= dt;
     if (this._armorPierceFx > 0) this._armorPierceFx -= dt;
     this.applyMove(dt);
+    this.updateKnockback(dt);
     this.updateElite(dt);
     this.updateSupport(dt);
     this.updateBeacon(dt);
@@ -741,6 +797,7 @@ class Enemy {
       this.drawCarrierSpawnRing(ctx);
       this.drawRoleAura(ctx);
       this.drawEliteMark(ctx);
+      this.drawCannonHitPips(ctx);
       return;
     }
     let c;
@@ -836,6 +893,24 @@ class Enemy {
     this.drawCarrierSpawnRing(ctx);
     this.drawRoleAura(ctx);
     this.drawEliteMark(ctx);
+    this.drawCannonHitPips(ctx);
+  }
+  // MO3:大炮形态五连暴击进度可视化——机身上方一排小圆点,亮起数 = 已吃的炮弹数(对 critEvery 取余),
+  //   集满(下一发即暴击)时整排变金色并放大脉动,让"每5发追加巨额暴击"这个机制看得见、可预判
+  drawCannonHitPips(ctx) {
+    if (!this._cannonHits || this.y <= 0 || !game.player || !game.player.cannonMode) return;
+    const morph = game.player.ship.morph; if (!morph) return;
+    const every = morph.critEvery || 5, n = this._cannonHits % every || every;
+    const full = n === every && this._cannonHits > 0;
+    const x = this.x, y = this.y - this.radius - (this.eliteCfg ? 24 : 12), gap = 9, total = (every - 1) * gap;
+    ctx.save(); ctx.textAlign = "center";
+    for (let i = 0; i < every; i++) {
+      const lit = i < n, px = x - total / 2 + i * gap, pulse = full ? 0.7 + Math.sin(game.titleT * 12) * 0.3 : 1;
+      ctx.globalAlpha = lit ? pulse : 0.25;
+      ctx.fillStyle = full ? "#ffd43b" : (lit ? "#99e9f2" : "rgba(255,255,255,.4)");
+      ctx.beginPath(); ctx.arc(px, y, full && lit ? 3.4 : 2.6, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
   }
   drawRoleAura(ctx) {
     if (this.y <= 0) return;
