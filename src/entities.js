@@ -25,6 +25,7 @@ class Player {
     this.shieldHp = 0; this.shieldMax = 0; this.shieldTimer = 0; this.shieldHits = 0; this.stealthTimer = 0;
     this.cannonMode = false;   // MO:双形态机——false 普通形态 / true 大炮形态(useSpecialMorph 切换)
     this._morphTransT = 0;   // MO4:形态切换后的"相位重组"残影过渡剩余时间(useSpecialMorph 触发,见 _drawMorphTransition)
+    this.morphShieldUp = false;   // MO11:曜迁双影被动——切换形态获得的相位护盾,可完整抵挡一次伤害,见 takeDamage/useSpecialMorph
     this._recoilT = 0;   // MO6:大炮开火后坐力动画剩余时间
   }
   update(dt) {
@@ -131,11 +132,19 @@ class Player {
       }
     }
   }
-  // X4:护盾(防御型必杀)优先吸收伤害——盾量池打光了溢出部分才真正扣血;隐身(侦查型必杀)期间和普通受击无敌一样完全免伤
+  // X4:护盾(防御型必杀)优先吸收伤害——盾量池打光了溢出部分才真正扣血
+  // MO11:曜迁双影的相位护盾(morphShieldUp)独立于上面这套盾量池——不计伤害数值,完整挡下这一次伤害后立刻破碎并触发冲击波
+  // X5:BUG修复——光学迷彩(stealthTimer)不再拦在这里免伤,改成"敌机不锁定/不开火"的隐匿玩法(见 game.stealthActive 的调用点),
+  //   隐身期间仍可能被已经在飞的弹幕或贴脸撞击打中
   takeDamage(d) {
-    if (this.invulnTimer > 0 || this.stealthTimer > 0) return;
+    if (this.invulnTimer > 0) return;
     let dmg = d * (this.ship.dmgTakenMult || 1) * game.chipValue("volatileCore", "damageTakenMult", 1) * game.damageTakenMult(), blocked = false;
-    if (this.shieldHp > 0) {
+    if (this.morphShieldUp) {
+      this.morphShieldUp = false;
+      game.spawnShieldHitSpark(this.x, this.y);
+      dmg = 0; blocked = true;
+      game.onMorphShieldBreak(this);
+    } else if (this.shieldHp > 0) {
       game.spawnShieldHitSpark(this.x, this.y);
       blocked = true;
       if (dmg <= this.shieldHp) { this.shieldHp -= dmg; dmg = 0; }
@@ -160,12 +169,19 @@ class Player {
     game.onPlayerHit(blocked);
     this.invulnTimer = this.invulnAmount; Sound.hit(); Haptics.hit(); game.addShake(4, 0.12); if (CONFIG.combo.resetOnHit) game.breakCombo();
   }
+  // GG12:无尽后期成长钩子——敌机血量 5 分钟后指数膨胀,固定 +1/+0.25 的溢出转化很快沦为杯水车薪,
+  //   改成 5 分钟起每 5 分钟翻一倍(与 dmgDoubleInterval 的敌方成长曲线同步),让非 morph 机型后期也有得刮
+  overflowStepMult() {
+    if (!game.endless) return 1;
+    const rampT = CONFIG.endless.dmgRampTime || 300;
+    return game._endlessT < rampT ? 1 : Math.pow(2, 1 + Math.floor((game._endlessT - rampT) / (CONFIG.endless.dmgDoubleInterval || 300)));
+  }
   addPower() {
     if (this.power < CONFIG.player.maxPower) this.power++;
-    else { this.overcharge = clamp(this.overcharge + 1, 0, CONFIG.player.maxOvercharge); this.powerDamage += CONFIG.overflow.powerDamageStep || 1; }
+    else { this.overcharge = clamp(this.overcharge + 1, 0, CONFIG.player.maxOvercharge); this.powerDamage += (CONFIG.overflow.powerDamageStep || 1) * this.overflowStepMult(); }
   }
   addBomb()    { this.bombs = clamp(this.bombs + 1, 0, CONFIG.player.maxBombs); }
-  addWing()    { if (this.wings < CONFIG.wingMax) this.wings++; else this.wingDamage += CONFIG.overflow.wingDamageStep || 0.25; }
+  addWing()    { if (this.wings < CONFIG.wingMax) this.wings++; else this.wingDamage += (CONFIG.overflow.wingDamageStep || 0.25) * this.overflowStepMult(); }
   addEnergy(n) { this.energy = clamp(this.energy + n * (this.ship.energyMult || 1), 0, 100); }
   heal(n)      { this.hp = clamp(this.hp + n, 0, this.maxHp); }
   applySlow(mult, dur) {
@@ -251,6 +267,15 @@ class Player {
     ctx.beginPath(); ctx.arc(x, y, r - 4, Math.PI * 1.15, Math.PI * 1.55); ctx.stroke();
     ctx.restore();
   }
+  // X6:相位护盾"待命中"常驻标识——虚线描边圈+缓慢脉动,和防御型那个实心玻璃泡泡(_drawShield)视觉上明显区分,
+  //   不看浮字/听音效也能一眼确认自己现在有没有这层盾,免得忘了带盾贴脸拼刀
+  _drawMorphShieldReady(ctx) {
+    const x = this.x, y = this.y, r = this.radius + 9, pulse = 0.55 + Math.sin(game.titleT * 5) * 0.35;
+    ctx.save(); ctx.globalAlpha = 0.5 + pulse * 0.3; ctx.strokeStyle = "#66d9e8"; ctx.lineWidth = 1.8;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
   // X4:隐身(侦查型必杀)光晕——比护盾更冷、更"虚化",两条错相位的青色描边圈缓慢扩散淡出,呼应"隐匿"而非"防护"
   _drawStealthShimmer(ctx) {
     const x = this.x, y = this.y;
@@ -260,13 +285,17 @@ class Player {
   }
   draw(ctx) {
     if (this.stealthTimer > 0) {   // X4:稳定半透明,而不是像普通受击无敌那样快速闪烁——两者要能一眼区分开
-      ctx.save(); ctx.globalAlpha = 0.4; this._drawBody(ctx); ctx.restore();
+      // X8:隐身最后 1 秒机身透明度开始闪烁,提示"马上要现形了",别站在弹幕堆里等着暴毙
+      const ending = this.stealthTimer < 1;
+      ctx.save(); ctx.globalAlpha = ending ? 0.4 + Math.abs(Math.sin(game.titleT * 14)) * 0.45 : 0.4;
+      this._drawBody(ctx); ctx.restore();
       this._drawStealthShimmer(ctx);
       return;
     }
     if (this.invulnTimer > 0 && (Math.floor(this.invulnTimer * 20) % 2 === 0)) return;
     this._drawBody(ctx);
     if (this.shieldHp > 0) this._drawShield(ctx);
+    if (this.morphShieldUp) this._drawMorphShieldReady(ctx);
   }
 }
 // X:机型专属机身剪影(delta 平衡/twin 攻击/bulk 防御/dart 侦查),按 ship.radiusMult 整体缩放
@@ -360,7 +389,8 @@ class EnemyBullet {
     this.slowMult = opts && opts.slowMult || 1; this.slowDur = opts && opts.slowDur || 0; this.tick = opts && opts.tick || 0.7; this._tickT = 0;
   }
   update(dt) {
-    if (this.kind === "homing" && game.player) {
+    // X5:隐身期间已发射的追踪弹也不再修正朝向(保持当前速度直飞),不然玩家隐身了追踪弹还在贴脸拐弯很违和
+    if (this.kind === "homing" && game.player && !game.stealthActive()) {
       const a = Math.atan2(game.player.y - this.y, game.player.x - this.x), sp = this.speed || Math.hypot(this.vx, this.vy);
       const k = clamp((this.turn || 0) * dt, 0, 1);
       this.vx += (Math.cos(a) * sp - this.vx) * k;
@@ -585,11 +615,13 @@ class Enemy {
       else if (this.phase === "hold") { this._ht += dt; this.x += Math.sin(this._mt * 4) * 60 * dt; if (this._ht >= m.hold) { this.phase = "dive"; this.vy = this.speed * m.diveVy; this.vx = clamp((game.player ? game.player.x - this.x : 0), -120, 120); } }
       else { this.x += this.vx * dt; this.y += this.vy * dt; }
     } else if (this.move === "dive") {
-      if (!this._aimed) { this.y += this.speed * dt; if (this.y > CONFIG.HEIGHT * m.triggerY && game.player) { const a = Math.atan2(game.player.y - this.y, game.player.x - this.x), sp = this.speed * m.speedMul; this.vx = Math.cos(a) * sp; this.vy = Math.sin(a) * sp; this._aimed = true; } }
+      // X5:隐身期间不获取瞄准——已经俯冲的继续飞完既定路线,还没锁定的就一直保持直线下落,等隐身结束再择机锁定
+      if (!this._aimed) { this.y += this.speed * dt; if (this.y > CONFIG.HEIGHT * m.triggerY && game.player && !game.stealthActive()) { const a = Math.atan2(game.player.y - this.y, game.player.x - this.x), sp = this.speed * m.speedMul; this.vx = Math.cos(a) * sp; this.vy = Math.sin(a) * sp; this._aimed = true; } }
       else { this.x += this.vx * dt; this.y += this.vy * dt; }
     } else if (this.move === "rearChase") {
+      // X5:隐身期间停止追踪转向(tracking=false)——已有的速度矢量照常飞,只是不再朝玩家新位置修正
       const p = game.player || { x: this.x, y: -this.radius }, warn = m.warn || 2, track = m.track || m.boost || 2, phaseMul = this._mt < warn ? 0.7 : (this._mt < warn + (m.boost || 2) ? (m.boostMul || 1.8) : (m.speedMul || 1));
-      const sp = this.speed * phaseMul, tracking = this._mt < warn + track, a = Math.atan2(p.y - this.y, p.x - this.x), turn = tracking ? clamp((m.turn || 4) * dt, 0, 1) : 0;
+      const sp = this.speed * phaseMul, tracking = this._mt < warn + track && !game.stealthActive(), a = Math.atan2(p.y - this.y, p.x - this.x), turn = tracking ? clamp((m.turn || 4) * dt, 0, 1) : 0;
       if (!this.vx && !this.vy) { this.vx = 0; this.vy = -sp; }
       if (tracking) {
         this.vx += (Math.cos(a) * sp - this.vx) * turn;
@@ -636,7 +668,11 @@ class Enemy {
     if (this._reflectCd > 0) this._reflectCd -= dt;
     if (this.y >= -this.radius && this.y <= CONFIG.HEIGHT + this.radius) this._entered = true;
     if (this._entered && (this.y > CONFIG.HEIGHT + this.radius || this.y < -this.radius - 80 || this.x < -70 || this.x > CONFIG.WIDTH + 70)) this.dead = true;
-    if (this.cfg.fireInterval > 0 && this.y > 0 && this.y < CONFIG.HEIGHT * 0.7 && game.player) {
+    // GG10:兜底清理——从未入屏却越走越远的敌机(如 fromBottom 类型误配下落系 move 一路往下飞)也要回收,
+    //   否则永久占用 maxEnemies 名额,无尽模式几分钟后就刷不出新怪
+    if (!this._entered && (this.y > CONFIG.HEIGHT + this.radius + 240 || this.y < -this.radius - 600 || this.x < -300 || this.x > CONFIG.WIDTH + 300)) this.dead = true;
+    // X5:光学迷彩隐身期间整个开火块冻结(计时器不走)——不获取新瞄准也不触发新弹幕,隐身结束后从冻结的地方接着走,不会"追帧"爆发
+    if (this.cfg.fireInterval > 0 && this.y > 0 && this.y < CONFIG.HEIGHT * 0.7 && game.player && !game.stealthActive()) {
       this._fireTimer -= dt;
       if (this.type === "sniper" && this._sniperWarn > 0) {
         this._sniperWarn -= dt;
@@ -662,7 +698,7 @@ class Enemy {
       game.floats.push(new FloatText(this.x, this.y - this.radius - 18, "再生 +" + Math.round(this.hp - before), this.eliteCfg.color));
       return;
     }
-    if (this.elite !== "charger" || !game.player) return;
+    if (this.elite !== "charger" || !game.player || game.stealthActive()) return;   // X5:隐身期间冻结蓄力/开火
     if (this._eliteWarn > 0) {
       this._eliteWarn -= dt;
       if (this._eliteWarn <= 0) {
@@ -685,7 +721,7 @@ class Enemy {
     if (game.repairNearbyEnemies(this) > 0) this._supportPulse = 0.45;
   }
   updateBeacon(dt) {
-    if (this.type !== "beacon" || this.y <= 0 || this.y >= CONFIG.HEIGHT * 0.72 || !game.player) return;
+    if (this.type !== "beacon" || this.y <= 0 || this.y >= CONFIG.HEIGHT * 0.72 || !game.player || game.stealthActive()) return;   // X5:隐身期间冻结标记/开火
     if (this._beaconWarn > 0) {
       this._beaconWarn -= dt;
       if (this._beaconWarn <= 0) {
@@ -700,7 +736,7 @@ class Enemy {
     if (this._beaconTimer <= 0) { this._beaconX = game.player.x; this._beaconWarn = this.cfg.markDelay || 0.75; }
   }
   updateMineLayer(dt) {
-    if (this.type !== "mineLayer" || this.y <= 0 || this.y >= CONFIG.HEIGHT * 0.72) return;
+    if (this.type !== "mineLayer" || this.y <= 0 || this.y >= CONFIG.HEIGHT * 0.72 || game.stealthActive()) return;   // X5:隐身期间冻结布雷
     this._mineTimer -= dt;
     if (this._mineTimer > 0) return;
     this._mineTimer = this.cfg.mineInterval || 2.2;
@@ -708,7 +744,7 @@ class Enemy {
     Sound.tone(360, 0.07, "square", 0.08, 180);
   }
   updatePhaseWing(dt) {
-    if (this.type !== "phaseWing" || this.y <= 0 || this.y >= CONFIG.HEIGHT * 0.72 || !game.player) return;
+    if (this.type !== "phaseWing" || this.y <= 0 || this.y >= CONFIG.HEIGHT * 0.72 || !game.player || game.stealthActive()) return;   // X5:隐身期间冻结闪现瞄点/开火
     if (this._phaseWarn > 0) {
       this._phaseWarn -= dt;
       if (this._phaseWarn <= 0) {
@@ -727,7 +763,7 @@ class Enemy {
     }
   }
   canUseEndlessSkill(minTime = 0) {
-    return game.endless && (!minTime || game._endlessT >= minTime) && this.y > 0 && this.y < CONFIG.HEIGHT * 0.76 && game.player;
+    return game.endless && (!minTime || game._endlessT >= minTime) && this.y > 0 && this.y < CONFIG.HEIGHT * 0.76 && game.player && !game.stealthActive();   // X5:隐身期间冻结无尽词缀技能(追踪弹/属性场)
   }
   updateHomingSkill(dt) {
     if (!this.cfg.homingInterval || !this.canUseEndlessSkill(this.cfg.homingMinTime || 0)) return;
@@ -760,7 +796,7 @@ class Enemy {
     }
   }
   reflectShot() {
-    if (this.type !== "mirrorDrone" || this._reflectCd > 0 || this.dead) return;
+    if (this.type !== "mirrorDrone" || this._reflectCd > 0 || this.dead || game.stealthActive()) return;   // X5:隐身期间不触发反射弹
     this._reflectCd = this.cfg.reflectCd || 0.9;
     const dir = game.rng() < 0.5 ? -1 : 1;
     game.spawnEnemyBullet(this.x, this.y, dir * (this.cfg.reflectSpeed || this.cfg.bulletSpeed || 230), 35, this.cfg.damage || 7);
@@ -809,6 +845,7 @@ class Enemy {
       this.drawRoleAura(ctx);
       this.drawEliteMark(ctx);
       this.drawCannonHitPips(ctx);
+      this.drawLostLock(ctx);
       return;
     }
     let c;
@@ -905,6 +942,30 @@ class Enemy {
     this.drawRoleAura(ctx);
     this.drawEliteMark(ctx);
     this.drawCannonHitPips(ctx);
+    this.drawLostLock(ctx);
+  }
+  // X8:统一的"取消预警"接口——隐身/信号屏蔽启动时由 game.onLostLockStart 调用,
+  //   把已进入预警动画的攻击(狙击线/充能/信标标记/闪现瞄点)直接作废并重置各自冷却;
+  //   以后新加带预警的敌机类型,在这里补一行即可,不用去改隐身逻辑
+  cancelWarn() {
+    if (this._sniperWarn > 0) { this._sniperWarn = 0; this._fireTimer = this.cfg.fireInterval * game.activeDiff.fireMult; }
+    if (this._eliteWarn > 0) { this._eliteWarn = 0; this._eliteCd = (this.eliteCfg && this.eliteCfg.cd) || 2.4; }
+    if (this._beaconWarn > 0) { this._beaconWarn = 0; this._beaconTimer = this.cfg.markInterval || 2.8; }
+    if (this._phaseWarn > 0) { this._phaseWarn = 0; this._phaseTimer = this.cfg.blinkInterval || 2.4; }
+  }
+  // X7:光学迷彩期间敌机头顶亮起黄色"?"——一眼看出"它已经找不到你了",给隐身一个明确的正反馈;
+  //   只给有攻击能力的敌机画(fireInterval>0 或带技能/精英),纯撞击杂兵本来也不"锁定"谁,画了反而误导
+  // X8:出现时带 0.2 秒的弹出缩放(从 1.6 倍缩回 1 倍),配合全场同时亮起,做出"所有敌机同时丢失目标"的演出感
+  drawLostLock(ctx) {
+    if (!game.stealthActive() || this.y <= 0) return;
+    if (!(this.cfg.fireInterval > 0 || this.eliteCfg || this.cfg.homingInterval || this.cfg.zoneKind || this.type === "beacon" || this.type === "phaseWing" || this.type === "mineLayer")) return;
+    const popT = clamp((game.titleT - (game._lostLockStartT || 0)) / 0.2, 0, 1);
+    const pop = 1.6 - 0.6 * popT;
+    const pulse = 0.55 + Math.sin(game.titleT * 6 + this.x * 0.05) * 0.3;
+    ctx.save(); ctx.globalAlpha = pulse * (0.4 + popT * 0.6); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#ffd43b"; ctx.font = "bold " + Math.round(14 * pop) + "px 'Segoe UI', sans-serif";
+    ctx.fillText("?", this.x, this.y - this.radius - (this.eliteCfg ? 34 : 22));
+    ctx.restore();
   }
   // MO3:大炮形态五连暴击进度可视化——机身上方一排小圆点,亮起数 = 已吃的炮弹数(对 critEvery 取余),
   //   集满(下一发即暴击)时整排变金色并放大脉动,让"每5发追加巨额暴击"这个机制看得见、可预判
@@ -1104,8 +1165,11 @@ class Boss {
     if (!this._enraged && this.hp / this.maxHp <= 0.2) { this._enraged = true; this._fireScale *= 0.7; game.onBossEnrage(this); }
     if (this.affix) game.updateBossAffix(this, dt);
     const phase = def.phases[phaseIndex];
-    this._fireTimer -= dt;
-    if (this._fireTimer <= 0) { this._fireTimer = phase.cd * this._fireScale; for (const atk of phase.attacks) runBossAttack(this, atk); }
+    // X5:隐身期间 BOSS 攻击计时器也冻结——不新开一轮弹幕,隐身结束后从冻结的地方接着倒数
+    if (!game.stealthActive()) {
+      this._fireTimer -= dt;
+      if (this._fireTimer <= 0) { this._fireTimer = phase.cd * this._fireScale; for (const atk of phase.attacks) runBossAttack(this, atk); }
+    }
   }
   damage(d) {
     if (this._invulnTimer > 0) { this._flash = 0.04; return false; }
@@ -1131,6 +1195,14 @@ class Boss {
     if (this._enraged) { const gr = r + 14 + Math.sin(this._t * 6) * 4; ctx.fillStyle = "rgba(255,40,40,.22)"; ctx.beginPath(); ctx.arc(x, y, gr, 0, Math.PI * 2); ctx.fill(); }
     if (this.affix && !flash) { ctx.strokeStyle = UI.rgba(this.affix.color, .72); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 20 + Math.sin(this._t * 5) * 3, 0, Math.PI * 2); ctx.stroke(); }
     if (this._invulnTimer > 0) { ctx.strokeStyle = "rgba(116,192,252,.92)"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x, y, r + 28 + Math.sin(this._t * 8) * 4, 0, Math.PI * 2); ctx.stroke(); }
+    // X7:光学迷彩期间 BOSS 头顶也亮"?"——和小怪同一套"失去索敌"反馈(X8:同样带弹出缩放)
+    if (game.stealthActive() && this._entered) {
+      const popT = clamp((game.titleT - (game._lostLockStartT || 0)) / 0.2, 0, 1), pop = 1.6 - 0.6 * popT;
+      ctx.save(); ctx.globalAlpha = (0.55 + Math.sin(game.titleT * 6) * 0.3) * (0.4 + popT * 0.6); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = "#ffd43b"; ctx.font = "bold " + Math.round(22 * pop) + "px 'Segoe UI', sans-serif";
+      ctx.fillText("?", x, y - r - 40);
+      ctx.restore();
+    }
     const bossImage = ImageAssets.boss(this.defIndex);
     if (ImageAssets.draw(ctx, bossImage, x, y, r * 2.45)) {
       if (flash) {
