@@ -222,10 +222,14 @@ const ImageAssets = {
     const full = { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
     if (typeof document === "undefined") return full;
     try {
+      // GG11:性能——大图(如 2848px 宽的标题 logo)逐像素扫透明边界会卡一帧,先等比缩到 ≤256px 的小画布上扫,
+      //   结果按比例放大回原图坐标;边界精度损失几个像素,对"裁掉大片透明边"这个目的毫无影响
+      const scale = Math.min(1, 256 / Math.max(img.naturalWidth, img.naturalHeight));
       const canvas = document.createElement("canvas");
-      canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+      canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
       const bctx = canvas.getContext("2d", { willReadFrequently: true });
-      bctx.drawImage(img, 0, 0);
+      bctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       const data = bctx.getImageData(0, 0, canvas.width, canvas.height).data;
       let minX = canvas.width, minY = canvas.height, maxX = -1, maxY = -1;
       for (let y = 0; y < canvas.height; y++) {
@@ -236,9 +240,10 @@ const ImageAssets = {
         }
       }
       if (maxX < 0) return full;
+      const inv = 1 / scale;
       const pad = Math.ceil(Math.max(maxX - minX + 1, maxY - minY + 1) * 0.08);
-      const x = Math.max(0, minX - pad), y = Math.max(0, minY - pad);
-      const x2 = Math.min(canvas.width, maxX + pad + 1), y2 = Math.min(canvas.height, maxY + pad + 1);
+      const x = Math.max(0, Math.floor((minX - pad) * inv)), y = Math.max(0, Math.floor((minY - pad) * inv));
+      const x2 = Math.min(img.naturalWidth, Math.ceil((maxX + pad + 1) * inv)), y2 = Math.min(img.naturalHeight, Math.ceil((maxY + pad + 1) * inv));
       const box = { x, y, w: x2 - x, h: y2 - y };
       if (key) this.boundsCache[key] = box;
       return box;

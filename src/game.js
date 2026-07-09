@@ -383,6 +383,7 @@ const game = {
     this._endlessEventsSeen.push(e.name || e.key);
     this._endlessRecentEvents = [e.key].concat(recent.filter(k => k !== e.key)).slice(0, 2);
     if (this._endlessStats) this._endlessStats.events++;
+    if (e.signalJam) this.onLostLockStart();   // X8:信号屏蔽事件触发时同样取消预警+启动"?"弹出动画
     this.banner(e.name, e.sub || "空域变化");
     Sound.powerup();
   },
@@ -486,7 +487,11 @@ const game = {
         const eventType = this.endlessEventValue("enemyType", null), eventChance = this.endlessEventValue("enemyChance", 0);
         const type = eventType && CONFIG.enemy[eventType] && this.rng() < eventChance ? eventType : (this.rng() < this.endlessEventValue("jammerChance", 0) ? "jammer" : this.pick(pool)), r = CONFIG.enemy[type].radius;
         const elite = type !== "small" && this.rng() < this.endlessEventValue("eliteChance", 0) ? this.pick(CONFIG.elite.types || ["shield", "charger"]) : null;
-        this.enemies.push(pools.enemy.get(type, r + 20 + this.rng() * (CONFIG.WIDTH - 2 * (r + 20)), 0, this.pick(moves), elite));
+        // GG10:BUG修复——fromBottom 类型(自爆机)必须用自己配置的专属移动(rearChase 从下方追上来),
+        //   之前随机套用普通下落系 move 会让它从屏幕下方一路往下飞、永不入屏也永不被清理,
+        //   悄悄占满 maxEnemies 上限,几分钟后场上就"只剩BOSS刷不出小怪"
+        const mv = CONFIG.enemy[type].fromBottom ? (CONFIG.enemy[type].move || "rearChase") : this.pick(moves);
+        this.enemies.push(pools.enemy.get(type, r + 20 + this.rng() * (CONFIG.WIDTH - 2 * (r + 20)), 0, mv, elite));
       }
       if (this.rng() < CONFIG.endless.powerupChance + this.endlessEventValue("powerupChanceAdd", 0)) this.spawnPowerUp(30 + this.rng() * (CONFIG.WIDTH - 60), this.endlessEventValue("forceDrop", null) || this.chooseDrop());
     }
@@ -839,9 +844,10 @@ const game = {
     const cfg = CONFIG.bonuses.perfectLine;
     return this.perfectLineActive() && cfg ? this.bonusStacks("perfectLine") * (cfg[prop] || 0) : 0;
   },
+  // X5:护盾放大器现在也认曜迁双影的相位护盾(morphShieldUp)——不只是防御型那套盾量池才算"有盾"
   shieldDamageMult() {
     const p = this.player;
-    return p && p.shieldHp > 0 ? this.bonusValue("shieldAmplifier", "damageMult") : 0;
+    return p && (p.shieldHp > 0 || p.morphShieldUp) ? this.bonusValue("shieldAmplifier", "damageMult") : 0;
   },
   playerDamage(d, target = null) {
     let m = 1 + this.bonusValue("damage", "damageMult") + this.bonusValue("glassCannon", "damageMult") + this.vitalReactorDamageMult() + this.stableFireDamageMult() + this.perfectLineValue("damageMult") + this.shieldDamageMult() + this.adrenalineValue("damageMult");
@@ -1937,22 +1943,40 @@ const game = {
     }
   },
   // 防御型:立即回一部分血 + 展开吸收伤害的护盾(见 Player.takeDamage / Player._drawShield)
+  // X7:数值联动——和曜迁双影的破盾冲击波一样,叠"护盾放大器"(shieldAmplifier)时盾量池按同一比例放大,
+  //   统一三种防御向被动的构筑深度:这条 bonus 从"有盾时加输出"升级为整条护盾 build 的核心强化件
   useSpecialShield() {
     const s = CONFIG.special;
+    const amp = 1 + this.bonusValue("shieldAmplifier", "damageMult");
+    const hp = Math.round(s.shieldHp * amp);
     this.player.heal(this.player.maxHp * s.healOnShield);
-    this.player.shieldHp = s.shieldHp; this.player.shieldMax = s.shieldHp; this.player.shieldTimer = s.shieldDur; this.player.shieldHits = s.shieldHits || 2;
+    this.player.shieldHp = hp; this.player.shieldMax = hp; this.player.shieldTimer = s.shieldDur; this.player.shieldHits = s.shieldHits || 2;
     this.burst(this.player.x, this.player.y, "#38d9a9", 22, 220); this.spawnShockwave(this.player.x, this.player.y, this.player.radius * 2.4, "#38d9a9");
   },
-  // 侦查型:长时间隐身免伤(见 Player.takeDamage / Player._drawStealthShimmer),不清场也不加防御,纯靠"躲开这一段"
+  // X5:侦查型改版——光学迷彩不再是"硬免伤",而是让敌机"看不见你":隐身期间敌机不获取/更新对玩家的瞄准,
+  //   也不触发任何新弹幕(已经在飞的弹幕/已经贴脸的撞击伤害仍然正常生效,见 Player.takeDamage 不再拦截 stealthTimer)。
+  //   持续时间相应拉长,换成"让整场战斗静默一段时间"而不是"这段时间白嫖免伤"。
   useSpecialStealth() {
     this.player.stealthTimer = CONFIG.special.stealthDur;
     this.burst(this.player.x, this.player.y, "#ffd43b", 18, 200);
+    this.onLostLockStart();
   },
+  // X7/X8:进入"全场失去索敌"状态(光学迷彩或信号屏蔽事件)的统一入口——
+  //   ①记录起始时间,给敌机头顶"?"的弹出缩放动画用;②取消所有已进入预警动画的攻击(收敛在 Enemy.cancelWarn,
+  //   新加带预警的敌机类型时在那边补一行即可),而不是把预警冻结在半路挂几秒
+  onLostLockStart() {
+    this._lostLockStartT = this.titleT;
+    for (const e of this.enemies) { if (!e.isBoss && e.cancelWarn) e.cancelWarn(); }
+  },
+  // X5:敌机(含 Boss)判断"是否该瞄准/开火"时统一查这个——隐身期间为 true,所有攻击/追踪逻辑照此跳过
+  // X8:"信号屏蔽"无尽事件也走同一判定——事件期间全场敌机同样失去索敌,和光学迷彩共享全部冻结/视觉逻辑
+  stealthActive() { return !!(this.player && this.player.stealthTimer > 0) || !!this.endlessEventValue("signalJam", false); },
   // 平衡型:向前(向上)发射一道会变宽的能量波,抵消沿途弹幕并对扫到的敌机造成一次伤害(见 SpecialWave / resolveSpecialWaves)
   useSpecialWave() {
     this.specialWaves.push(new SpecialWave(this.player.x, this.player.y - this.player.radius, this.player.ship.color));
   },
   // MO:双形态机:切换普通/大炮形态,并原地放一圈向四周扩散的爆震波(清弹+对扫到的敌机各结算一次伤害,见 updateMorphBlasts)
+  // MO11:被动改版——每次切换形态额外获得一层"相位护盾"(挡下一次伤害),护盾被打碎时原地炸出一圈小范围冲击波(见 onMorphShieldBreak)
   useSpecialMorph() {
     const p = this.player;
     p.cannonMode = !p.cannonMode;
@@ -1960,22 +1984,43 @@ const game = {
     p._morphTransT = 0.25;   // MO4:触发机身的"相位重组"残影过渡(见 Player._drawMorphTransition)
     this._morphSwitchesThisRun = (this._morphSwitchesThisRun || 0) + 1;   // MO5:单局形态切换计数,给无尽结算战报用
     p.invulnTimer = Math.max(p.invulnTimer, 0.5);   // 切换瞬间给极短无敌,免得形态动画里被贴脸弹打断节奏
+    p.morphShieldUp = true;   // MO11:相位护盾——切一次形态就补满一层,不需要额外操作
     this.floats.push(new FloatText(p.x, p.y - 44, p.cannonMode ? "⇋ 大炮形态" : "⇋ 普通形态", p.ship.color));
     this.morphBlasts.push({ x: p.x, y: p.y, r: 12, dead: false, hitEnemies: new Set() });
     this.spawnShockwave(p.x, p.y, 130, p.ship.color);
     this.burst(p.x, p.y, p.ship.color, 26, 260);
     this._morphFlashTimer = 0.22; Sound.morphShift(); Haptics.morphShift(); this.addShake(6, 0.18);   // MO3:全屏反馈——白闪+音效+短促震屏,强化切换的冲击感
   },
+  // MO11:相位护盾破碎——原地炸一圈小范围冲击波,复用 morphBlasts/updateMorphBlasts 那套推进+清弹+伤害逻辑,
+  //   只是带上专属 maxR(远小于形态切换那道全屏波)和 healOnDeath 标记,让 updateMorphBlasts 结算完消耗数后回血。
+  // X6:数值联动——叠"护盾放大器"(shieldAmplifier)强化时冲击波跟着变大,给这条被动线留一点构筑空间,
+  //   而不是固定死数值;半径基数也翻倍(2.6→5.2),清场/回血能力更扎实。
+  onMorphShieldBreak(p) {
+    const morph = p.ship.morph; if (!morph) return;
+    const ampMult = 1 + this.bonusValue("shieldAmplifier", "damageMult");
+    const maxR = p.radius * (morph.shieldBlastRadiusMult || 5.2) * ampMult;
+    this.morphBlasts.push({ x: p.x, y: p.y, r: 4, dead: false, hitEnemies: new Set(), maxR, healOnDeath: true, clearedBullets: 0, clearedEnemies: 0 });
+    this.spawnShockwave(p.x, p.y, maxR, "#66d9e8");
+    this.burst(p.x, p.y, "#66d9e8", 14, 180);
+    this.floats.push(new FloatText(p.x, p.y - p.radius - 20, "相位护盾破碎!", "#66d9e8"));
+    Sound.shieldBreak(); Haptics.shieldBreak(); this.addShake(3, 0.1);
+  },
   // MO:爆震波推进——半径匀速扩散,清掉扫过的所有敌弹,对每架敌机只结算一次伤害,到达最大半径后消亡
+  // MO11:healOnDeath 的波(护盾破碎波)额外记录清了多少发弹幕/消灭了多少敌机,波消亡时按"消除弹幕数+消灭敌人数"回血
   updateMorphBlasts(dt) {
     const m = (this.player && this.player.ship.morph) || {};
-    const speed = m.blastSpeed || 640, maxR = m.blastMaxR || 560;
+    const speed = m.blastSpeed || 640;
     for (const w of this.morphBlasts) {
       if (w.dead) continue;
+      const maxR = w.maxR || m.blastMaxR || 560;
       w.r += speed * dt;
       // 沿波前随机撒能量火花,强化"能量在环上流动"的观感
       for (let i = 0; i < 2; i++) { const ang = Math.random() * Math.PI * 2; this.spawnHitSpark(w.x + Math.cos(ang) * w.r, w.y + Math.sin(ang) * w.r); }
-      for (const b of this.enemyBullets) { if (b.dead || b.kind === "fire" || b.kind === "ice") continue; const dx = b.x - w.x, dy = b.y - w.y; if (dx * dx + dy * dy <= w.r * w.r) { b.dead = true; this.spawnHitSpark(b.x, b.y); } }
+      for (const b of this.enemyBullets) {
+        if (b.dead || b.kind === "fire" || b.kind === "ice") continue;
+        const dx = b.x - w.x, dy = b.y - w.y;
+        if (dx * dx + dy * dy <= w.r * w.r) { b.dead = true; this.spawnHitSpark(b.x, b.y); if (w.healOnDeath) w.clearedBullets++; }
+      }
       for (const e of this.enemies) {
         if (e.dead || w.hitEnemies.has(e)) continue;
         const dx = e.x - w.x, dy = e.y - w.y, rr = w.r + e.radius;
@@ -1985,10 +2030,17 @@ const game = {
           // MO6:非 BOSS 敌机沿波心向外击退(衰减推力,约 30~50px),给"清弹"之外再加一层防御性的喘息窗口;BOSS 免疫,避免打断 BOSS 战节奏
           if (!e.isBoss) { const d = Math.hypot(dx, dy) || 1; e._kbT = 0.35; e._kbVX = dx / d * 260; e._kbVY = dy / d * 260; }
           const dmg = (m.blastDamage || 45) + e.maxHp * (m.blastPctMaxHp || 0);
-          if (e.damage(this.playerDamage(dmg, e))) this.onEnemyKilled(e); else this.spawnHitSpark(e.x, e.y);
+          if (e.damage(this.playerDamage(dmg, e))) { this.onEnemyKilled(e); if (w.healOnDeath) w.clearedEnemies++; }
+          else this.spawnHitSpark(e.x, e.y);
         }
       }
-      if (w.r >= maxR) w.dead = true;
+      if (w.r >= maxR) {
+        w.dead = true;
+        if (w.healOnDeath && this.player) {
+          const heal = w.clearedBullets + w.clearedEnemies;
+          if (heal > 0) { this.player.heal(heal); this.floats.push(new FloatText(w.x, w.y - 30, "相位回收 +" + heal, "#66d9e8")); }
+        }
+      }
     }
     pruneDead(this.morphBlasts);
   },
@@ -2417,9 +2469,10 @@ const game = {
     this.shockwaves.forEach(o => o.draw(ctx));
     this.specialWaves.forEach(o => o.draw(ctx));
     // MO3:爆震波——统一走 drawMorphBlastWave(单一连续渐变),和首页/机型选择的展示动画共用同一套调色,视觉严格同步
+    // MO11:每道波自带 maxR(护盾破碎的小范围波用自己的半径,不再统一套用形态切换那道全屏波的 blastMaxR)
     {
-      const m = (this.player && this.player.ship.morph) || {}, maxR = m.blastMaxR || 560;
-      for (const w of this.morphBlasts) { if (!w.dead) this.drawMorphBlastWave(ctx, w.x, w.y, w.r, maxR); }
+      const m = (this.player && this.player.ship.morph) || {}, fallbackMaxR = m.blastMaxR || 560;
+      for (const w of this.morphBlasts) { if (!w.dead) this.drawMorphBlastWave(ctx, w.x, w.y, w.r, w.maxR || fallbackMaxR); }
     }
     this.floats.forEach(o => o.draw(ctx));
     if (this.player) this.player.draw(ctx);
@@ -4085,21 +4138,35 @@ const game = {
       const affixText = this.bossAffixHUDText(this.boss);
       if (affixText) { ctx.fillStyle = (this.boss.affix && this.boss.affix.color) || "#adb5bd"; ctx.font = "bold 12px 'Segoe UI', sans-serif"; ctx.fillText(affixText, CONFIG.WIDTH - 20, by + bh + 15); }
       ctx.textAlign = "left";
-      // MO9:大炮命中次数指示——Boss 是独立类,没有走 Enemy.drawCannonHitPips 那套机身上方小圆点(BOSS体型大,叠在机身上不够醒目),
-      //   改在血条左下角单独画一排,凑满 critEvery 发就变金色脉动,配合上面"屏障期间不计数"的修复,能更准地判断下一发是不是暴击
+      // MO9:大炮暴击充能指示("曜能锁定")——Boss 是独立类,没有走 Enemy.drawCannonHitPips 那套机身上方小圆点(BOSS体型大,叠在机身上不够醒目),
+      //   改在血条左下角画一个玻璃胶囊仪表:一排菱形能量格,凑满 critEvery 发时整排金色脉动并提示"临界",
+      //   配合"屏障期间不计数"的修复,能准确判断下一发是不是会心暴击
       if (this.player.ship.specialType === "morph") {
         const morph = this.player.ship.morph, every = morph.critEvery || 5;
         const hits = this.boss._cannonHits || 0, n = hits % every || (hits > 0 ? every : 0);
-        const full = n === every && hits > 0, py = by + bh + 15;
-        ctx.font = "bold 11px 'Segoe UI', sans-serif"; ctx.fillStyle = "#adb5bd"; ctx.fillText("大炮命中", bx, py + 4);
-        const dotsX0 = bx + 56, gap = 11;
+        const full = n === every && hits > 0, py = by + bh + 16;
+        const label = "曜能锁定", labelW = 54, gap = 13, capW = labelW + every * gap + 14, capH = 17;
+        // 玻璃胶囊底(和 HUD 其他仪表同一套视觉语言),临界时描边跟着变金色发光
+        ctx.save();
+        if (full) { ctx.shadowColor = "rgba(255,212,59,.8)"; ctx.shadowBlur = 8; }
+        UI.roundRect(ctx, bx, py - capH / 2, capW, capH, capH / 2);
+        ctx.fillStyle = "rgba(8,16,28,.62)"; ctx.fill();
+        ctx.lineWidth = 1.2; ctx.strokeStyle = full ? "rgba(255,212,59,.85)" : "rgba(102,217,232,.4)"; ctx.stroke();
+        ctx.restore();
+        ctx.font = "bold 11px 'Segoe UI', sans-serif"; ctx.fillStyle = full ? "#ffd43b" : "#66d9e8"; ctx.fillText(label, bx + 8, py + 4);
+        const dotsX0 = bx + labelW + 14;
         for (let i = 0; i < every; i++) {
           const lit = i < n, pulse = full ? 0.7 + Math.sin(this.titleT * 12) * 0.3 : 1;
-          ctx.globalAlpha = lit ? pulse : 0.3;
+          const dx = dotsX0 + i * gap, s = full && lit ? 4.6 : 3.6;
+          ctx.save();
+          ctx.globalAlpha = lit ? pulse : 0.28;
+          if (lit) { ctx.shadowColor = full ? "#ffd43b" : "#66d9e8"; ctx.shadowBlur = 6; }
           ctx.fillStyle = full ? "#ffd43b" : (lit ? "#99e9f2" : "rgba(255,255,255,.4)");
-          ctx.beginPath(); ctx.arc(dotsX0 + i * gap, py, full && lit ? 4 : 3, 0, Math.PI * 2); ctx.fill();
+          // 菱形能量格(旋转 45° 的方块),比圆点更有"能量单元"的科幻感
+          ctx.translate(dx, py); ctx.rotate(Math.PI / 4); ctx.fillRect(-s / 2, -s / 2, s, s);
+          ctx.restore();
         }
-        ctx.globalAlpha = 1;
+        if (full) { ctx.font = "bold 11px 'Segoe UI', sans-serif"; ctx.fillStyle = "#ffd43b"; ctx.fillText("临界!", bx + capW + 8, py + 4); }
       }
     }
 

@@ -134,7 +134,9 @@ const CONFIG = {
     pierce: { name: "穿甲弹链", desc: "主炮可额外穿透 1 个目标", color: "#ffd43b", pierce: 1 },
     chainSpark: { name: "连锁电弧", desc: "击杀会电击附近敌人", color: "#74c0fc", damage: 3, range: 210 },
     salvage: { name: "残骸回收", desc: "每 5 次击杀获得护盾", color: "#20c997", shield: 8, every: 5, dur: 5, pickBuff: { label: "护盾 +6", shield: 6, dur: 3 } },
-    shieldAmplifier: { name: "护盾放大器", desc: "有护盾时全武器伤害 +14%", color: "#74c0fc", rarity: "稀有", weight: 34, damageMult: 0.14 },
+    // X7:desc 补上新的护盾联动效果(防御型盾量池/曜迁破盾冲击波按同一比例放大,见 useSpecialShield/onMorphShieldBreak)
+    // X8:权重 34→28——联动后这张卡同时强化输出和防御,快成万金油了,压低出现率先观察
+    shieldAmplifier: { name: "护盾放大器", desc: "有护盾时全武器伤害 +14%,护盾技能效果 +14%", color: "#74c0fc", rarity: "稀有", weight: 28, damageMult: 0.14 },
     shieldBreaker: { name: "破盾电荷", desc: "对敌方护盾伤害 +45%,击破护盾时震击附近敌人", color: "#74c0fc", rarity: "稀有", weight: 34, shieldDamageMult: 0.45, breakDamage: 5, range: 130, pickBuff: { label: "清弹 120", clearBullets: 120 } },
     kineticAmmo: { name: "动能弹芯", desc: "主炮基础伤害 +1", color: "#ffa94d", bulletDamage: 1 },
     heavyRounds: { name: "钨芯重弹", desc: "主炮伤害 +2,主炮射速 -12%", color: "#ffd43b", rarity: "稀有", weight: 30, bulletDamage: 2, mainCooldownPenalty: 0.12 },
@@ -293,27 +295,34 @@ const CONFIG = {
       bodyShape: "dart", lerpMult: 1.5, radiusMult: 0.78, dmgTakenMult: 1.0, energyMult: 1.15, comboTimeoutMult: 1.0, bombDmgMult: 1.0, specialCooldownMult: 0.75,
       weaponBias: { homingIntervalMult: 0.9, homingTurnBonus: 1.1, chargeRate: 1.1 },
       perkName: "灵敏机动", perkDesc: "机动/能量更强 · 追踪弹与蓄力更灵活",
-      specialType: "stealth", specialName: "光学迷彩", specialDesc: "短暂隐身,期间免疫所有伤害" },
+      // X5:被动改版——隐身不再免伤,而是让敌机长时间(7秒)锁定不到你、不开新火,已有弹幕仍可能命中
+      specialType: "stealth", specialName: "光学迷彩", specialDesc: "长时间隐身,期间敌机无法锁定/停止开火,但仍可能被现有弹幕击中" },
     // MO:双形态机——技能不是一次性爆发,而是切换普通/大炮两种形态,切换瞬间放一圈向四周扩散的爆震波(清弹+伤害)。
     //   大炮形态:主炮改发贯穿能量炮弹,攻速降到10%、单发800%主炮伤害、大判定;同一敌机每吃5发炮弹追加一次巨额暴击。
     //   morph 子表是该机型专属参数,只有 specialType==="morph" 的机型会读。
     morph: { key: "morph", name: "曜迁双影", role: "双形态", color: "#66d9e8", desc: "双形态切换·爆震清弹", hpMult: 1.0, fireMult: 1.0, bombs: 0, wings: 0,
       bodyShape: "delta", lerpMult: 1.0, radiusMult: 1.05, dmgTakenMult: 1.0, energyMult: 1.15, comboTimeoutMult: 1.0, bombDmgMult: 1.0, specialCooldownMult: 1.0,
-      perkName: "相位核心", perkDesc: "技能能量获取 +15%,更快完成形态切换",
-      specialType: "morph", specialName: "形态切换·爆震波", specialDesc: "切换普通/大炮形态,原地释放向四周扩散的爆震波,清除弹幕并造成伤害",
+      // MO11:被动改版——把"切换形态送一层护盾+碎裂清弹回血"写进被动介绍,原有的能量+15%效果保留但压缩成后半句附带说明
+      perkName: "相位核心", perkDesc: "切换形态获相位护盾,碎裂时原地清弹回血 · 能量+15%",
+      specialType: "morph", specialName: "形态切换·爆震波", specialDesc: "切换普通/大炮形态,原地释放向四周扩散的爆震波,清除弹幕并造成伤害;附带一层护盾,碎裂后小范围清弹回血",
       // MO2:炮弹重新设计为高速轨道炮弹(见 entities.js PlayerBullet.draw source==="cannon"),bulletSpeed 2000 远快于普通主炮(950),
       //   贯穿判定 + 800% 单发伤害的"重炮"应该一眼看出速度感,原来 500 反而比普通子弹还慢,不符合"炮弹"的直觉
       // MO3:爆震波伤害不再是纯固定值——固定底数 + 敌机当前最大生命值的一定比例,和无尽模式里敌机血量随威胁等级持续膨胀的曲线同步增长,
       //   避免后期威胁等级拉满后固定 45 点变成聊胜于无的挠痒痒
-      morph: { fireIntervalMult: 10, damageMult: 8, critEvery: 5, critMult: 5, bulletRadius: 15, bulletSpeed: 2000, blastDamage: 45, blastPctMaxHp: 0.05, blastSpeed: 640, blastMaxR: 560 } },
+      // MO10:平衡调整——多发化后单发伤害削到原来的 2/3(8→16/3),会心暴击加成翻倍(5→10)。
+      // MO12:会心暴击伤害再翻一倍(10→20),把该机型的输出重心进一步压到"攒满曜能锁定打临界一击"的爆发节奏上
+      // X6:破盾冲击波半径基数翻倍(2.6→5.2),清场/回血手感更扎实;shieldAmplifier 强化叠加时还会在此基础上再放大(见 onMorphShieldBreak)
+      morph: { fireIntervalMult: 10, damageMult: 16 / 3, critEvery: 5, critMult: 20, bulletRadius: 15, bulletSpeed: 2000, blastDamage: 45, blastPctMaxHp: 0.05, blastSpeed: 640, blastMaxR: 560,
+        shieldBlastRadiusMult: 5.2 } },
   },
   // A:僚机上限。B:必杀(能量攒满 + 冷却结束才可释放,offensive 全屏重伤;对 BOSS 伤害减半)
   wingMax: 6,
   // X3:cooldown 10→15(必杀强度没变,拉长间隔避免刷太快);新增 passiveGainPerSec —— 除了击杀攒能量,不管有没有击杀都按秒缓慢回能
   //   (60秒能从0攒满,纯粹是保底,不会比正常边打边攒更快),避免"没打到东西的时候必杀完全不涨"的干等感
   // X4:机型专属必杀参数——shieldHp/shieldDur/healOnShield 给防御型;stealthDur 给侦查型;waveDamage/waveSpeed/waveWidthGrow 给平衡型
+  // X5:侦查型改版——光学迷彩不再是纯免伤,而是"敌机不锁定/不开火"(仍可能被已有弹幕擦到),时长相应拉长(4.0→7.0)
   special: { bossDamage: 110, gainPerKill: 3, gainBossKill: 25, passiveGainPerSec: 1.7, invuln: 0.8, cooldown: 15,
-    shieldHp: 60, shieldDur: 9, shieldHits: 2, healOnShield: 0.3, stealthDur: 4.0, waveDamage: 45 },
+    shieldHp: 60, shieldDur: 9, shieldHits: 2, healOnShield: 0.3, stealthDur: 7.0, waveDamage: 45 },
   endlessDifficulties: {
     normal: {
       key: "normal", name: "常规演练", color: "#4dabf7",
@@ -365,6 +374,9 @@ const CONFIG = {
       { key: "ionStorm", name: "离子风暴", color: "#cc5de8", sub: "周期镭射航道", routeBias: "激光", laserEvery: 4.2, laserDelay: 1.2, warn: 0.72, dur: 0.5, width: 34, damage: 7, jitter: 190 },
       { key: "crossfire", name: "交叉火线", color: "#ff922b", sub: "周期侧向弹幕", routeBias: "生存", minTime: 120, bulletEvery: 3.8, bulletDelay: 1.0, bulletRows: 5, bulletSpeed: 250, bulletDamage: 6, scoreBonus: 0.10 },
       { key: "jammerCloud", name: "扰频云层", color: "#15aabf", sub: "干扰机增多", routeBias: "追踪", spawnBonus: 1, jammerChance: 0.42 },
+      // X8:信号屏蔽——全场敌机进入和光学迷彩相同的"失去索敌"状态(复用 stealthActive 那套判定,敌机不锁定/不开新火),
+      //   相当于送玩家一段全场静默的输出窗口,分数加成压低一点作平衡
+      { key: "signalJam", name: "信号屏蔽", color: "#99e9f2", sub: "敌机失去索敌", routeBias: "主炮", minTime: 90, signalJam: true, scoreBonus: 0.05 },
       { key: "sniperLockdown", name: "狙击封锁", color: "#e64980", sub: "狙击机增多,分数提升", routeBias: "主炮", minTime: 90, enemyType: "sniper", enemyChance: 0.46, spawnBonus: 1, powerupChanceAdd: 0.03, scoreBonus: 0.09 },
       { key: "minefield", name: "爆雷空域", color: "#fab005", sub: "爆雷机增多,分数和威胁提升", routeBias: "导弹", minTime: 130, enemyType: "detonator", enemyChance: 0.44, spawnBonus: 1, scoreBonus: 0.12, threatGainMult: 1.12 },
       { key: "shieldWall", name: "护盾纵队", color: "#74c0fc", sub: "护盾运输机增多,敌群更耐打", routeBias: "主炮", minTime: 140, enemyType: "shieldCarrier", enemyChance: 0.42, spawnBonus: 1, enemyHpMult: 0.08, scoreBonus: 0.10 },
@@ -448,7 +460,10 @@ const TUTORIAL_PAGES = [
   { icon: "🔥", title: "连击 & 道具", lines: ["连续击杀不中断可以叠连击倍率,越高分越多", "火力满级后继续吃火力会进入超载,强化激光/导弹/追踪弹", "常规关卡每隔几秒会自然刷新一个道具"] },
   { icon: "⚠", title: "BOSS 机制", lines: ["BOSS 血量过低会触发狂暴,攻击变快变猛", "镭射攻击有红色预警,亮起后千万别站在里面", "首页"+ "「📖 图鉴」" + "可以查看所有 BOSS 的详细信息"] },
   // MO4:双形态机(曜迁双影)机制和其他机型差异太大,新手第一次切到大炮形态很容易把"攻速变慢"误判成中了负面效果,专门补一页说清楚
-  { icon: "⇋", title: "双形态机(曜迁双影)", lines: ["机型技能不是打一下就完的必杀,而是切换普通/大炮两种形态", "切换瞬间原地炸出一圈爆震波,清弹 + 对扫到的敌机造成伤害", "大炮形态:攻速大幅降低,但单发伤害极高、可贯穿多架敌机", "同一架敌机连续吃满 5 发炮弹,会额外触发一次巨额暴击"] },
+  // X6:补上相位护盾被动的说明——不然玩家不知道切完形态自己身上多了一层能挡一下的盾
+  { icon: "⇋", title: "双形态机(曜迁双影)", lines: ["机型技能不是打一下就完的必杀,而是切换普通/大炮两种形态", "切换瞬间原地炸出一圈爆震波,清弹 + 对扫到的敌机造成伤害", "大炮形态:攻速大幅降低,但单发伤害极高、可贯穿多架敌机", "同一架敌机连续吃满 5 发炮弹,会额外触发一次巨额暴击", "被动:每次切换形态获得一层相位护盾,碎裂时会原地小范围清弹回血"] },
+  // X6:光学迷彩改版后不再是纯免伤,容易被老玩家的经验误导,专门补一页说清楚新规则
+  { icon: "🫥", title: "光学迷彩(冥域魔瞳)", lines: ["隐身期间敌机无法瞄准你,也不会开新的火", "但已经飞出去的弹幕、贴脸相撞仍然会正常造成伤害", "本质是让战场安静一段时间,而不是硬吃伤害的无敌"] },
   { icon: "🛩", title: "机型 & 世界", lines: ["不同机型有独特的被动技能和专属机型技能,首页可左右滑动查看", "关卡地图也能换机型,和首页共用同一个选择", "已开放 5 个世界共 15 关,难度逐步升级"] },
 ];
 
