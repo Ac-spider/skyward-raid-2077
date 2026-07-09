@@ -5,7 +5,7 @@
  * ===================================================================== */
 const game = {
   state: "title", diff: CONFIG.difficulties.normal, ship: CONFIG.ships.balanced, currentLevel: 0, world: 1, player: null, boss: null,
-  playerBullets: [], homingShots: [], missiles: [], playerLasers: [], enemyBullets: [], enemies: [], powerups: [], particles: [], imageEffects: [], floats: [], lasers: [], gravityPulses: [], shockwaves: [], specialWaves: [],
+  playerBullets: [], homingShots: [], missiles: [], playerLasers: [], enemyBullets: [], enemies: [], powerups: [], particles: [], imageEffects: [], floats: [], lasers: [], gravityPulses: [], shockwaves: [], specialWaves: [], morphBlasts: [],
   score: 0, combo: 0, comboTimer: 0, maxCombo: 0,
   threat: 0, chips: {}, bonuses: {}, _chipCursor: 0, _chipChoices: [], _chipRerolls: 0, _bonusRerolls: 0, _nextChipDraftAt: 0, _bonusKillN: 0, _noHitT: 0, _fieldRepairT: 0, _repairLoopT: 0, _emergencyBarrierCd: 0, _lastStandCd: 0, _leechCd: 0, _startingDrafts: 0, _startingDraftsTotal: 0, _inStartingDraft: false, _chipStats: {}, _bonusStats: {}, _bonusHpGain: {}, _maxThreatLevel: 0,
   flashTimer: 0, bannerText: "", bannerSub: "", bannerTimer: 0, warningTimer: 0, titleT: 0, _sliderDrag: false,
@@ -241,7 +241,7 @@ const game = {
     this._startingDrafts = 0; this._startingDraftsTotal = 0;
     this.state = "playing";
     this.player = new Player(); this.boss = null;
-    this.playerBullets = []; this.homingShots = []; this.missiles = []; this.playerLasers = []; this.enemyBullets = []; this.enemies = []; this.powerups = []; this.particles = []; this.imageEffects = []; this.floats = []; this.lasers = []; this.gravityPulses = []; this.shockwaves = []; this.specialWaves = [];
+    this.playerBullets = []; this.homingShots = []; this.missiles = []; this.playerLasers = []; this.enemyBullets = []; this.enemies = []; this.powerups = []; this.particles = []; this.imageEffects = []; this.floats = []; this.lasers = []; this.gravityPulses = []; this.shockwaves = []; this.specialWaves = []; this.morphBlasts = [];
     this.score = 0; this.combo = 0; this.comboTimer = 0; this.maxCombo = 0;
     this.resetDepthSystems();
     this.flashTimer = 0; this.warningTimer = 0; this._recorded = false;
@@ -274,7 +274,7 @@ const game = {
     this._worldTransFrom = this.world; this._worldTransT = this.worldTransitionDur();
     this.state = "playing";
     this.player = new Player(); this.boss = null;
-    this.playerBullets = []; this.homingShots = []; this.missiles = []; this.playerLasers = []; this.enemyBullets = []; this.enemies = []; this.powerups = []; this.particles = []; this.imageEffects = []; this.floats = []; this.lasers = []; this.gravityPulses = []; this.shockwaves = []; this.specialWaves = [];
+    this.playerBullets = []; this.homingShots = []; this.missiles = []; this.playerLasers = []; this.enemyBullets = []; this.enemies = []; this.powerups = []; this.particles = []; this.imageEffects = []; this.floats = []; this.lasers = []; this.gravityPulses = []; this.shockwaves = []; this.specialWaves = []; this.morphBlasts = [];
     this.score = 0; this.combo = 0; this.comboTimer = 0; this.maxCombo = 0;
     this.resetDepthSystems();
     this.flashTimer = 0; this.warningTimer = 0; this._hpTrailRatio = 1; this._overflowBatch = {};
@@ -781,6 +781,7 @@ const game = {
     const p = this.player;
     let d = CONFIG.bullet.damage + this.bonusValue("kineticAmmo", "bulletDamage") + this.bonusValue("heavyRounds", "bulletDamage") + this.armorCaliberDamage() + this.routeBonus("主炮", 1) + (p ? (source === "wing" ? p.wingDamage || 0 : p.powerDamage || 0) : 0);
     if (this.mainBulletArmorPierces(target)) d *= 1 + this.bonusValue("armorPiercer", "heavyDamageMult");
+    if (source === "cannon") d *= (p && p.ship.morph && p.ship.morph.damageMult) || 8;   // MO:大炮形态单发 800% 主炮伤害
     return d;
   },
   mainBulletArmorPierces(target) { return this.bonusStacks("armorPiercer") > 0 && target && target.maxHp >= (CONFIG.bonuses.armorPiercer.minHp || 12); },
@@ -1893,6 +1894,7 @@ const game = {
     if (type === "shield") this.useSpecialShield();
     else if (type === "stealth") this.useSpecialStealth();
     else if (type === "wave") this.useSpecialWave();
+    else if (type === "morph") this.useSpecialMorph();
     else this.useSpecialNuke();
   },
   // 攻击型:原有的全屏重伤 + 短暂无敌,数值/行为完全不变
@@ -1919,6 +1921,34 @@ const game = {
   // 平衡型:向前(向上)发射一道会变宽的能量波,抵消沿途弹幕并对扫到的敌机造成一次伤害(见 SpecialWave / resolveSpecialWaves)
   useSpecialWave() {
     this.specialWaves.push(new SpecialWave(this.player.x, this.player.y - this.player.radius, this.player.ship.color));
+  },
+  // MO:双形态机:切换普通/大炮形态,并原地放一圈向四周扩散的爆震波(清弹+对扫到的敌机各结算一次伤害,见 updateMorphBlasts)
+  useSpecialMorph() {
+    const p = this.player;
+    p.cannonMode = !p.cannonMode;
+    p._fireTimer = 0;   // 切换后立刻按新形态的节奏开火,不用等旧形态的冷却走完
+    p.invulnTimer = Math.max(p.invulnTimer, 0.5);   // 切换瞬间给极短无敌,免得形态动画里被贴脸弹打断节奏
+    this.floats.push(new FloatText(p.x, p.y - 44, p.cannonMode ? "⇋ 大炮形态" : "⇋ 普通形态", p.ship.color));
+    this.morphBlasts.push({ x: p.x, y: p.y, r: 12, dead: false, hitEnemies: new Set() });
+    this.spawnShockwave(p.x, p.y, 130, p.ship.color);
+    this.burst(p.x, p.y, p.ship.color, 26, 260);
+  },
+  // MO:爆震波推进——半径匀速扩散,清掉扫过的所有敌弹,对每架敌机只结算一次伤害,到达最大半径后消亡
+  updateMorphBlasts(dt) {
+    const m = (this.player && this.player.ship.morph) || {};
+    const speed = m.blastSpeed || 640, maxR = m.blastMaxR || 560, dmg = m.blastDamage || 45;
+    for (const w of this.morphBlasts) {
+      if (w.dead) continue;
+      w.r += speed * dt;
+      for (const b of this.enemyBullets) { if (b.dead || b.kind === "fire" || b.kind === "ice") continue; const dx = b.x - w.x, dy = b.y - w.y; if (dx * dx + dy * dy <= w.r * w.r) { b.dead = true; this.spawnHitSpark(b.x, b.y); } }
+      for (const e of this.enemies) {
+        if (e.dead || w.hitEnemies.has(e)) continue;
+        const dx = e.x - w.x, dy = e.y - w.y, rr = w.r + e.radius;
+        if (dx * dx + dy * dy <= rr * rr) { w.hitEnemies.add(e); if (e.damage(this.playerDamage(dmg, e))) this.onEnemyKilled(e); else this.spawnHitSpark(e.x, e.y); }
+      }
+      if (w.r >= maxR) w.dead = true;
+    }
+    pruneDead(this.morphBlasts);
   },
 
   onEnemyKilled(e, allowDrop = true, byBomb = false) {
@@ -2137,6 +2167,7 @@ const game = {
 
     this.resolveCollisions();
     this.resolveSpecialWaves();
+    this.updateMorphBlasts(dt);
 
     // AA:血条残影 —— 掉血时缓慢跟随下降(0.5/秒),涨血瞬间跟上,营造"最近损失多少血"的反馈
     { const ratio = clamp(this.player.hp / this.player.maxHp, 0, 1); this._hpTrailRatio = this._hpTrailRatio > ratio ? Math.max(ratio, this._hpTrailRatio - dt * 0.5) : ratio; }
@@ -2161,7 +2192,18 @@ const game = {
         if (!hit(b, e)) continue;
         b.hitEnemies.add(e); this.spawnHitSpark(b.x, b.y);
         if (this.mainBulletArmorPierces(e) && (!e._armorPierceFx || e._armorPierceFx <= 0)) { e._armorPierceFx = 0.35; this.floats.push(new FloatText(e.x, e.y - e.radius - 10, "破甲", CONFIG.bonuses.armorPiercer.color)); }
-        if (e.damage(this.playerDamage(this.mainBulletDamage(e, b.source), e), "bullet")) this.onEnemyKilled(e);
+        let dmg = this.playerDamage(this.mainBulletDamage(e, b.source), e);
+        // MO:同一敌机每吃满 critEvery 发大炮炮弹,这一发追加 critMult 倍巨额暴击
+        if (b.source === "cannon") {
+          const m = this.player.ship.morph;
+          e._cannonHits = (e._cannonHits || 0) + 1;
+          if (m && e._cannonHits % (m.critEvery || 5) === 0) {
+            dmg += Math.round(dmg * (m.critMult || 5));
+            this.floats.push(new FloatText(e.x, e.y - e.radius - 12, "会心暴击!", "#ffd43b"));
+            this.burst(e.x, e.y, "#ffd43b", 16, 240); this.addShake(5, 0.15);
+          }
+        }
+        if (e.damage(dmg, "bullet")) this.onEnemyKilled(e);
         if (b.pierce > 0) { b.pierce--; continue; }
         b.dead = true; break;
       }
@@ -2281,6 +2323,15 @@ const game = {
     this.imageEffects.forEach(o => o.draw(ctx));
     this.shockwaves.forEach(o => o.draw(ctx));
     this.specialWaves.forEach(o => o.draw(ctx));
+    // MO:爆震波——双圈能量环(外圈亮边+内圈填充),随扩散半径淡出
+    for (const w of this.morphBlasts) {
+      if (w.dead) continue;
+      const m = (this.player && this.player.ship.morph) || {}, a = clamp(1 - w.r / (m.blastMaxR || 560), 0, 1);
+      ctx.save(); ctx.globalAlpha = 0.25 + a * 0.55;
+      ctx.strokeStyle = "#99e9f2"; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(w.x, w.y, w.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha *= 0.5; ctx.strokeStyle = "#66d9e8"; ctx.lineWidth = 14; ctx.beginPath(); ctx.arc(w.x, w.y, Math.max(0, w.r - 10), 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
     this.floats.forEach(o => o.draw(ctx));
     if (this.player) this.player.draw(ctx);
     if (Settings.data.controlMode === "joystick" && this.state === "playing") this.drawJoystick(ctx);
@@ -2610,6 +2661,27 @@ const game = {
     UI.button(ctx, r, { label: icon ? text : fallbackLabel, color: "#adb5bd", font: 15, radius: 10 });
     if (icon) ImageAssets.draw(ctx, icon, r.x + 21, r.y + r.h / 2, 20);
   },
+  // MO2:双形态机在首页/机型选择"展示"时(非对局内)自动来回切换形态——1形态停留1秒→原地放一次爆震波的同时切到2形态→
+  //   停留1秒→再放一次爆震波切回1形态,循环往复。用全局 titleT 驱动,同一时刻首页大图和机型选择弧形展台看到的形态严格同步。
+  shipMorphDemoPhase(t) {
+    const half = 1.8, blastDur = 0.7, tt = t % (half * 2);   // MO2:展示节奏放慢——停留更久,冲击波也拉长展开时间
+    const cannonMode = tt >= half;
+    const since = cannonMode ? tt - half : tt;
+    return { cannonMode, blastT: since < blastDur ? since / blastDur : -1 };
+  },
+  // 展示专用的机身绘制——非双形态机原样绘制;双形态机叠加自动切换 + 冲击波(纯视觉,不涉及任何战斗判定)
+  drawShipPreview(ctx, x, y, shipCfg) {
+    if (shipCfg.specialType !== "morph") { drawShipBody(ctx, x, y, shipCfg); return; }
+    const demo = this.shipMorphDemoPhase(this.titleT);
+    if (demo.blastT >= 0) {
+      const maxR = 120, r = demo.blastT * maxR, a = clamp(1 - demo.blastT, 0, 1);
+      ctx.save(); ctx.globalAlpha *= 0.25 + a * 0.55;
+      ctx.strokeStyle = "#99e9f2"; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha *= 0.5; ctx.strokeStyle = "#66d9e8"; ctx.lineWidth = 14; ctx.beginPath(); ctx.arc(x, y, Math.max(0, r - 10), 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+    drawShipBody(ctx, x, y, shipCfg, demo.cannonMode ? "cannon" : null);
+  },
   drawTitle(ctx) {
     const cx = CONFIG.WIDTH / 2, t = this.titleT;
     ctx.fillStyle = "rgba(0,0,0,.45)"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
@@ -2625,7 +2697,7 @@ const game = {
     // 悬停的当前机型(上下浮动;随玩家切换机型实时变化,用游戏内同款精致机身图)
     const py = 300 + Math.sin(t * 1.6) * 6;
     ctx.save(); ctx.translate(cx, py); ctx.scale(1.4, 1.4);
-    drawShipBody(ctx, 0, 0, this.ship);
+    this.drawShipPreview(ctx, 0, 0, this.ship);
     ctx.restore();
     // 设置(右上角)/ 图鉴(左上角)小图标按钮
     this.drawTitleSmallButton(ctx, this.titleSettingsRect(), "settings", "⚙ 设置", "设置");
@@ -2635,7 +2707,7 @@ const game = {
     this.drawTitleImageButton(ctx, this.titleStartRect(), "map", { label: "关卡地图 MAP", color: "#38d9a9", active: true, font: 26, radius: 16 });
     this.drawTitleImageButton(ctx, this.titleEndlessRect(), "challenge", { label: "无尽挑战 CHALLENGE", sub: "常规演练 / 绝境深潜", color: "#ff922b", active: true, font: 26, radius: 16 });
     this.drawTitleImageButton(ctx, this.titleChallengeRect(), "rival", { label: "挑战码 RIVAL", sub: "挑战码 / 每日", color: "#ffd43b", active: true, font: 25, radius: 16 });
-    this.drawTitleImageButton(ctx, this.titleShipRect(), "ship", { label: "机型选择 SHIP", sub: this.ship.name, color: "#4dabf7", active: true, font: 24, radius: 16 });
+    this.drawTitleImageButton(ctx, this.titleShipRect(), "ship", { label: "机型选择 SHIP", sub: this.ship.name + (this.ship.specialType === "morph" ? " · 试用款" : ""), color: "#4dabf7", active: true, font: 24, radius: 16 });
     // Q:排行榜按关卡区分,标题页无具体关卡上下文,故不再显示总榜;进入关卡结算/失败画面时显示该关排行
     ctx.fillStyle = "#868e96"; ctx.font = "14px 'Segoe UI', sans-serif"; ctx.fillText("排行榜 · 按关卡分别记录,通关或失败后可见", cx, 700);
     ImageAssets.drawRect(ctx, ImageAssets.title("footerGlow"), cx, 872, CONFIG.WIDTH, 176);
@@ -2672,15 +2744,28 @@ const game = {
     UI.panel(ctx, info.x, info.y, info.w, info.h, 18, { accent: sp.color, lineWidth: 2.5 });
     ctx.fillStyle = sp.color; ctx.font = "bold 27px 'Segoe UI', sans-serif"; ctx.fillText(sp.name, cx, info.y + 36);
     // GG:新代号(穹界震吼等)是氛围向的机体昵称,原本的"平衡型/攻击型…"分类特点改画成名字下方的小徽章,一眼看出这是什么定位
+    // MO2:双形态机额外挂一枚"试用款"徽章(展示页会自动来回切换形态,提示玩家这是在演示机型效果),和角色徽章并排居中
     const roleLabel = sp.role || "";
-    if (roleLabel) {
+    const pills = [];
+    if (roleLabel) pills.push({ text: roleLabel, color: sp.color });
+    if (sp.specialType === "morph") pills.push({ text: "试用款", color: "#ffd43b" });
+    if (pills.length) {
       ctx.font = "bold 12px 'Segoe UI', sans-serif";
-      const padX = 12, pillH = 21, pillW = ctx.measureText(roleLabel).width + padX * 2, pillY = info.y + 48;
-      UI.roundRect(ctx, cx - pillW / 2, pillY, pillW, pillH, pillH / 2);
-      ctx.fillStyle = UI.rgba(sp.color, .16); ctx.fill();
-      UI.roundRect(ctx, cx - pillW / 2, pillY, pillW, pillH, pillH / 2);
-      ctx.strokeStyle = UI.rgba(sp.color, .6); ctx.lineWidth = 1.2; ctx.stroke();
-      ctx.fillStyle = sp.color; ctx.textBaseline = "middle"; ctx.fillText(roleLabel, cx, pillY + pillH / 2 + 1); ctx.textBaseline = "alphabetic";
+      const padX = 12, pillH = 21, gap = 8, pillY = info.y + 48;
+      const widths = pills.map(p => ctx.measureText(p.text).width + padX * 2);
+      const totalW = widths.reduce((a, b) => a + b, 0) + gap * (pills.length - 1);
+      let px = cx - totalW / 2;
+      ctx.textBaseline = "middle";
+      pills.forEach((p, i) => {
+        const w = widths[i];
+        UI.roundRect(ctx, px, pillY, w, pillH, pillH / 2);
+        ctx.fillStyle = UI.rgba(p.color, .16); ctx.fill();
+        UI.roundRect(ctx, px, pillY, w, pillH, pillH / 2);
+        ctx.strokeStyle = UI.rgba(p.color, .6); ctx.lineWidth = 1.2; ctx.stroke();
+        ctx.fillStyle = p.color; ctx.fillText(p.text, px + w / 2, pillY + pillH / 2 + 1);
+        px += w + gap;
+      });
+      ctx.textBaseline = "alphabetic";
     }
     ctx.fillStyle = "#dee2e6"; ctx.font = "15px 'Segoe UI', sans-serif"; ctx.fillText(sp.desc, cx, info.y + 96);
 
@@ -2780,7 +2865,7 @@ const game = {
       ctx.save(); ctx.globalAlpha = clamp(1 - absO * 0.42, 0.22, 1); ctx.translate(x, y);
       ctx.rotate(clamp(offset, -1, 1) * 0.1);   // 侧边机型带一点转台角度,而不是和中心完全平行的死板剪影
       ctx.scale(scale, scale);
-      drawShipBody(ctx, 0, 0, shipCfg);
+      this.drawShipPreview(ctx, 0, 0, shipCfg);
       ctx.restore();
     }
     ctx.restore();   // 结束展示框裁剪
@@ -3446,6 +3531,17 @@ const game = {
       ctx.beginPath(); ctx.arc(x, y, s * 0.28, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = 1;
       ctx.beginPath(); ctx.moveTo(x - s * 1.05, y - s * 0.95); ctx.lineTo(x + s * 1.05, y + s * 0.95); ctx.stroke();
+    } else if (type === "morph") {   // MO:双向循环箭头——一眼看出"切换形态"
+      const rot = t * 1.1, rr = s * 0.78;
+      for (let h = 0; h < 2; h++) {
+        const a0 = rot + h * Math.PI, a1 = a0 + Math.PI * 0.72;
+        ctx.beginPath(); ctx.arc(x, y, rr, a0, a1); ctx.stroke();
+        const hx = x + Math.cos(a1) * rr, hy = y + Math.sin(a1) * rr, ta = a1 + Math.PI / 2;
+        ctx.beginPath(); ctx.moveTo(hx + Math.cos(ta) * s * 0.34, hy + Math.sin(ta) * s * 0.34);
+        ctx.lineTo(hx + Math.cos(a1 + 2.6) * s * 0.3, hy + Math.sin(a1 + 2.6) * s * 0.3);
+        ctx.lineTo(hx + Math.cos(a1 - 0.5) * s * 0.3, hy + Math.sin(a1 - 0.5) * s * 0.3); ctx.closePath(); ctx.fill();
+      }
+      ctx.beginPath(); ctx.arc(x, y, s * 0.22, 0, Math.PI * 2); ctx.fill();
     } else if (type === "wave") {
       const ph = (t * 1.2) % 1;   // 波纹相位缓慢流动,暗示"正在向外扩散"
       for (let i = 1; i <= 3; i++) { ctx.globalAlpha = Math.max(0, 1 - (i - 1) * 0.28 - ph * 0.15); ctx.beginPath(); ctx.arc(x, y + s * 0.55, s * 0.42 * i, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke(); }
@@ -3476,6 +3572,10 @@ const game = {
       ctx.beginPath(); ctx.moveTo(x, y - s); ctx.lineTo(x + s * 0.8, y - s * 0.4); ctx.lineTo(x + s * 0.8, y + s * 0.25); ctx.lineTo(x, y + s * 1.05); ctx.lineTo(x - s * 0.8, y + s * 0.25); ctx.lineTo(x - s * 0.8, y - s * 0.4); ctx.closePath();
       ctx.fill();
       ctx.strokeStyle = "rgba(0,0,0,.35)"; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(x - s * 0.55, y); ctx.lineTo(x + s * 0.55, y); ctx.stroke();
+    } else if (shipKey === "morph") {   // MO:相位核心——两枚交叠双三角(两种形态),中间能量点
+      ctx.globalAlpha = 0.85; ctx.beginPath(); ctx.moveTo(x - s * 0.85, y + s * 0.55); ctx.lineTo(x - s * 0.1, y - s * 0.75); ctx.lineTo(x + s * 0.35, y + s * 0.55); ctx.closePath(); ctx.stroke();
+      ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.moveTo(x - s * 0.35, y + s * 0.55); ctx.lineTo(x + s * 0.1, y - s * 0.75); ctx.lineTo(x + s * 0.85, y + s * 0.55); ctx.closePath(); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(x, y + s * 0.05, s * 0.16, 0, Math.PI * 2); ctx.fill();
     } else {   // scout
       for (let i = 0; i < 3; i++) { const dy = (i - 1) * s * 0.5; ctx.globalAlpha = 1 - Math.abs(i - 1) * 0.3; ctx.beginPath(); ctx.moveTo(x - s * 0.9, y + dy - s * 0.15); ctx.lineTo(x + s * 0.7 - Math.abs(i - 1) * s * 0.25, y + dy); ctx.stroke(); }
       ctx.globalAlpha = 1;

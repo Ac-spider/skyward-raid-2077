@@ -272,7 +272,7 @@ const CONFIG = {
   //   bodyShape 决定 Player 机身剪影(delta/twin/bulk/dart,见 drawShipBody)
   // X4:必杀技机型专属化(specialType,见 game.useSpecial 分派)—— 攻击型保留原来的全屏重伤;防御型改护盾+回血;
   //   侦查型改隐身;平衡型改冲击波抵消弹幕。specialName/specialDesc 供机型选择页展示。
-  shipOrder: ["balanced", "attacker", "defender", "scout"],
+  shipOrder: ["balanced", "attacker", "defender", "scout", "morph"],
   ships: {
     balanced: { key: "balanced", name: "穹界震吼", role: "平衡型", color: "#4dabf7", desc: "均衡·带1僚机", hpMult: 1.0, fireMult: 1.0,  bombs: 0, wings: 1,
       bodyShape: "delta", lerpMult: 1.0, radiusMult: 1.0, dmgTakenMult: 1.0, energyMult: 1.0, comboTimeoutMult: 1.0, bombDmgMult: 1.0, specialCooldownMult: 1.0,
@@ -294,6 +294,16 @@ const CONFIG = {
       weaponBias: { homingIntervalMult: 0.9, homingTurnBonus: 1.1, chargeRate: 1.1 },
       perkName: "灵敏机动", perkDesc: "机动/能量更强 · 追踪弹与蓄力更灵活",
       specialType: "stealth", specialName: "光学迷彩", specialDesc: "短暂隐身,期间免疫所有伤害" },
+    // MO:双形态机——技能不是一次性爆发,而是切换普通/大炮两种形态,切换瞬间放一圈向四周扩散的爆震波(清弹+伤害)。
+    //   大炮形态:主炮改发贯穿能量炮弹,攻速降到10%、单发800%主炮伤害、大判定;同一敌机每吃5发炮弹追加一次巨额暴击。
+    //   morph 子表是该机型专属参数,只有 specialType==="morph" 的机型会读。
+    morph: { key: "morph", name: "曜迁双影", role: "双形态", color: "#66d9e8", desc: "双形态切换·爆震清弹", hpMult: 1.0, fireMult: 1.0, bombs: 0, wings: 0,
+      bodyShape: "delta", lerpMult: 1.0, radiusMult: 1.05, dmgTakenMult: 1.0, energyMult: 1.15, comboTimeoutMult: 1.0, bombDmgMult: 1.0, specialCooldownMult: 1.0,
+      perkName: "相位核心", perkDesc: "技能能量获取 +15%,更快完成形态切换",
+      specialType: "morph", specialName: "形态切换·爆震波", specialDesc: "切换普通/大炮形态,原地释放向四周扩散的爆震波,清除弹幕并造成伤害",
+      // MO2:炮弹重新设计为高速轨道炮弹(见 entities.js PlayerBullet.draw source==="cannon"),bulletSpeed 2000 远快于普通主炮(950),
+      //   贯穿判定 + 800% 单发伤害的"重炮"应该一眼看出速度感,原来 500 反而比普通子弹还慢,不符合"炮弹"的直觉
+      morph: { fireIntervalMult: 10, damageMult: 8, critEvery: 5, critMult: 5, bulletRadius: 15, bulletSpeed: 2000, blastDamage: 45, blastSpeed: 640, blastMaxR: 560 } },
   },
   // A:僚机上限。B:必杀(能量攒满 + 冷却结束才可释放,offensive 全屏重伤;对 BOSS 伤害减半)
   wingMax: 6,
