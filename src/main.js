@@ -192,6 +192,7 @@ ImageAssets.loadAllTiered(() => {
 Settings.load();                                   // 载入持久化设置(音量/音效/震动/上次难度)
 Progress.load();                                   // 载入关卡进度
 Achievements.load();                               // OO:载入成就进度
+game.grantStarterGear();                           // RG2:首次启动送一整套制式机装,只发一次
 game.diff = CONFIG.difficulties[Settings.data.diff];
 game.ship = CONFIG.ships[Settings.data.ship] || CONFIG.ships.balanced;
 game.autoNext = !!Settings.data.autoNext;

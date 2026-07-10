@@ -142,7 +142,7 @@ const Settings = {
   key: "kzts_settings",
   // JJ:音效/音乐拆成独立音量+独立开关(原来共用一个 volume,音乐音效没法分别调)
   data: { sfxVolume: 0.8, musicVolume: 0.7, sound: true, music: true, haptics: true, diff: "normal", endlessDiff: "normal", ship: "balanced", autoNext: false, autoSpecial: false, autoLaser: false, hideWings: false, seenTutorial: false, controlMode: "drag", mpSide: "right", mpTop: 8,
-    gearOwned: [], gearLoadout: {} },   // RG:机装系统——已拾取的装备key列表 / 8槽位当前装备(slotKey -> itemKey,未装备为空)
+    gearOwned: [], gearLoadout: {}, gearStarterGranted: false },   // RG:机装系统——已拾取的装备key列表 / 8槽位当前装备 / 是否已发过新手礼包(制式全套)
   load() {
     try {
       const s = JSON.parse(localStorage.getItem(this.key));

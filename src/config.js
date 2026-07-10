@@ -444,10 +444,10 @@ const CONFIG = {
   // RG:机装系统——每架飞机 8 个装备槽位,一一对应 8 个战区(world 1~8),关卡结算时按当前战区掉落对应槽位的装备。
   //   简化模型:不做随机词条/多属性混合,每个槽位固定挂一个数值维度、3 档固定数值(制式/精密/魄能),无贴图先用槽位主题色占位。
   gearSlots: [
-    { key: "wing",        name: "翼载强化", world: 1, color: "#4dabf7", stat: "maxHpMult",           desc: "提升最大生命值" },
+    { key: "wing",        name: "翼装强化", world: 1, color: "#4dabf7", stat: "maxHpMult",           desc: "提升最大生命值" },
     { key: "engine",      name: "引擎核心", world: 2, color: "#51cf66", stat: "agilityMult",          desc: "提升移动机动性" },
     { key: "fireControl", name: "火控矩阵", world: 3, color: "#ff6b6b", stat: "damageMult",           desc: "提升主炮/副炮伤害" },
-    { key: "armor",       name: "装甲层",   world: 4, color: "#868e96", stat: "damageReductionMult",  desc: "降低受到的伤害" },
+    { key: "armor",       name: "反应装甲", world: 4, color: "#868e96", stat: "damageReductionMult",  desc: "降低受到的伤害" },
     { key: "avionics",    name: "航电阵列", world: 5, color: "#cc5de8", stat: "comboLeniencyMult",    desc: "延长连击容错时间" },
     { key: "powerCore",   name: "动力核心", world: 6, color: "#ffd43b", stat: "energyMult",           desc: "加快机型技能能量恢复" },
     { key: "hardpoint",   name: "武装挂架", world: 7, color: "#ff922b", stat: "secondaryDamageMult",  desc: "提升导弹/追踪弹/镭射伤害" },

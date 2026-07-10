@@ -115,8 +115,51 @@ const game = {
     const order = this.shipSelectOrder(), i = order.indexOf(this.ship.key);
     this._shipIdx = i >= 0 ? i : 0; this._shipScroll = this._shipIdx; this._shipScrollTarget = this._shipIdx;
     this._shipDragging = false; this._shipDragMoved = false; this._shipSnapping = false;
+    this._shipViewMode = "info"; this._equipPickerSlot = null;   // RG2:每次进机型选择页都回到"详情"视图,不记上次切到装备页
   },
   shipSelectBackRect() { return { x: 20, y: 28, w: 90, h: 36 }; },
+  // RG2:详情/装备 二选一切换——放在返回按钮同一行的最右侧,和图鉴标签同一套 UI.button 视觉。
+  //   横向标题贴图(drawSectionTitle "ship", maxW 210 居中于 cx)实测渲染宽度也就 210,右边缘落在 x=375,
+  //   这两个按钮必须整体挪到 x>375 之后,否则会被标题图压住(实测验证过,见 shot-shipequip-diagram.png 的教训)
+  shipViewToggleRect(mode) { return mode === "info" ? { x: CONFIG.WIDTH - 160, y: 28, w: 70, h: 36 } : { x: CONFIG.WIDTH - 80, y: 28, w: 70, h: 36 }; },
+  // RG2:机装槽位在"装备"视图里围着机身摆成一圈(8个方位,从正上方顺时针),leader line 从机身边缘拉到槽位图标
+  equipSlotAnchor() { const info = this.shipInfoPanelRect(); return { cx: CONFIG.WIDTH / 2, cy: info.y + info.h / 2 + 14, rx: 172, ry: 148 }; },
+  equipSlotNodePos(i) {
+    const a = this.equipSlotAnchor(), angle = -Math.PI / 2 + i * (Math.PI * 2 / CONFIG.gearSlots.length);
+    return { x: a.cx + Math.cos(angle) * a.rx, y: a.cy + Math.sin(angle) * a.ry, angle, cx: a.cx, cy: a.cy };
+  },
+  equipSlotHit(px, py) {
+    for (let i = 0; i < CONFIG.gearSlots.length; i++) { const p = this.equipSlotNodePos(i); if (Math.hypot(px - p.x, py - p.y) <= 32) return i; }
+    return null;
+  },
+  gearOwnsAny(slotKey) { return CONFIG.gearTiers.some(t => this.gearOwns(this.gearItemKey(slotKey, t.key))); },
+  // RG2:点开的装备槽——从"该类型已拥有的档位"里选一个装备,外加一行"卸下装备"(只有当前有装备时才出现),点选项外的区域关闭不改动
+  equipPickerOptions(slotKey) {
+    if (!slotKey) return [];
+    const owned = CONFIG.gearTiers.filter(t => this.gearOwns(this.gearItemKey(slotKey, t.key))).map(t => this.gearItemKey(slotKey, t.key));
+    if (this.gearEquipped(slotKey)) owned.push(null);   // null = "卸下装备" 这一行
+    return owned;
+  },
+  equipPickerRect() {
+    const n = this.equipPickerOptions(this._equipPickerSlot).length, h = 70 + n * 46;
+    return { x: CONFIG.WIDTH / 2 - 140, y: CONFIG.HEIGHT / 2 - h / 2, w: 280, h };
+  },
+  equipPickerRowRect(i) { const r = this.equipPickerRect(); return { x: r.x + 14, y: r.y + 56 + i * 46, w: r.w - 28, h: 38 }; },
+  equipPickerPointerDown(px, py) {
+    const slotKey = this._equipPickerSlot, r = this.equipPickerRect();
+    const inR = (rr) => px >= rr.x && px <= rr.x + rr.w && py >= rr.y && py <= rr.y + rr.h;
+    if (!inR(r)) { this._equipPickerSlot = null; return; }   // 点弹窗外面 = 取消,不改动装备
+    const opts = this.equipPickerOptions(slotKey);
+    for (let i = 0; i < opts.length; i++) {
+      if (inR(this.equipPickerRowRect(i))) {
+        const loadout = Object.assign({}, Settings.data.gearLoadout);
+        loadout[slotKey] = opts[i];
+        Settings.set("gearLoadout", loadout);
+        this._equipPickerSlot = null;
+        return;
+      }
+    }
+  },
   // GG:所有区块的位置都从这两个矩形派生,保证"画出来的"和"点得到的"永远对得上,也不会再有下方按钮/提示语重叠的问题
   shipInfoPanelRect() { return { x: 30, y: 92, w: CONFIG.WIDTH - 60, h: 452 }; },
   shipCaseRect() { const p = this.shipInfoPanelRect(); return { x: p.x, y: p.y + p.h + 18, w: p.w, h: 210 }; },
@@ -153,6 +196,14 @@ const game = {
   shipSelectPointerDown(px, py) {
     const inR = (r) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
     if (inR(this.shipSelectBackRect())) { this.toTitle(); return; }
+    if (inR(this.shipViewToggleRect("info"))) { this._shipViewMode = "info"; this._equipPickerSlot = null; return; }
+    if (inR(this.shipViewToggleRect("gear"))) { this._shipViewMode = "gear"; this._equipPickerSlot = null; return; }
+    // RG2:装备视图下,点击优先交给装备槽/选择弹窗处理,不会漏到下面的箭头/展台判定里
+    if (this._shipViewMode === "gear") {
+      if (this._equipPickerSlot) { this.equipPickerPointerDown(px, py); return; }
+      const idx = this.equipSlotHit(px, py);
+      if (idx != null) { const slotKey = CONFIG.gearSlots[idx].key; if (this.gearOwnsAny(slotKey)) this._equipPickerSlot = slotKey; return; }
+    }
     if (inR(this.shipSelectArrowRect(-1))) { this.beginShipSnap(Math.round(this._shipScroll) - 1); return; }
     if (inR(this.shipSelectArrowRect(1))) { this.beginShipSnap(Math.round(this._shipScroll) + 1); return; }
     if (inR(this.shipSelectConfirmRect())) { this.setShip(this.shipSelectOrder()[this._shipIdx]); return; }
@@ -907,6 +958,12 @@ const game = {
     const roll = Math.random() * total; let acc = 0, tier = "t1";
     for (const t of ["t1", "t2", "t3"]) { acc += weights[t] || 0; if (roll <= acc) { tier = t; break; } }
     return this.gearItemKey(slot.key, tier);
+  },
+  // RG2:新手礼包——每个用户首次启动免费拿一整套制式(t1)装备,8槽位全配好,不用先刷关卡才有得穿。只发一次(存档标记)。
+  grantStarterGear() {
+    if (Settings.data.gearStarterGranted) return;
+    for (const s of CONFIG.gearSlots) this.gearAward(this.gearItemKey(s.key, "t1"));
+    Settings.set("gearStarterGranted", true);
   },
   // RG:图鉴机装页——点一个槽位行,在"未装备→已拥有档位从低到高→未装备"之间循环,不需要额外的确认弹窗
   gearCycleSlot(slotKey) {
@@ -3073,10 +3130,15 @@ const game = {
     // GG9:标题贴图化——复用首页"机型选择 SHIP"同款 logo
     this.drawSectionTitle(ctx, "ship", cx, 50, { w: 210, h: 64, fallback: "选择机型", fallbackBaselineAdj: 16 });
     UI.button(ctx, this.shipSelectBackRect(), { label: "‹ 首页", color: "#adb5bd", font: 15, radius: 10 });
+    // RG2:详情/装备切换——所有飞机共用同一套机装,所以这个切换不跟着下方展台选的机型变,只影响介绍面板内容
+    UI.button(ctx, this.shipViewToggleRect("info"), { label: "详情", color: "#4dabf7", active: this._shipViewMode === "info", font: 14, radius: 10 });
+    UI.button(ctx, this.shipViewToggleRect("gear"), { label: "装备", color: "#ff922b", active: this._shipViewMode === "gear", font: 14, radius: 10 });
 
     // ── 介绍面板放上面:代号/角色标签/简介/性能条/被动/机型技能(机身模型挪到下方展示框,不占这里空间) ──
     const info = this.shipInfoPanelRect();
     UI.panel(ctx, info.x, info.y, info.w, info.h, 18, { accent: sp.color, lineWidth: 2.5 });
+    if (this._shipViewMode === "gear") { this.drawShipEquip(ctx, sp, key); }
+    else {
     ctx.fillStyle = sp.color; ctx.font = "bold 27px 'Segoe UI', sans-serif"; ctx.fillText(sp.name, cx, info.y + 36);
     // GG:新代号(穹界震吼等)是氛围向的机体昵称,原本的"平衡型/攻击型…"分类特点改画成名字下方的小徽章,一眼看出这是什么定位
     // MO2:双形态机额外挂一枚"试用款"徽章(展示页会自动来回切换形态,提示玩家这是在演示机型效果),和角色徽章并排居中
@@ -3173,6 +3235,7 @@ const game = {
     ctx.fillStyle = "#ffd43b"; ctx.font = "bold 15px 'Segoe UI', sans-serif"; ctx.fillText(sp.specialName || "—", skillTextX, skillBoxY + 18);
     ctx.fillStyle = "#dee2e6"; ctx.font = "12px 'Segoe UI', sans-serif";
     UI.wrapText(ctx, sp.specialDesc || "", skillTextW).forEach((line, i) => ctx.fillText(line, skillTextX, skillBoxY + 38 + i * 15));
+    }   // RG2:结束 _shipViewMode==="info" 分支
 
     // ── 下方:独立的玻璃展示框(和上面介绍面板同一视觉语言),框内是可丝滑拖动的弧形展台轮播 ──
     const box = this.shipCaseRect(), baseY = this.shipCarouselBaseY(), spacing = this.shipCarouselSpacing(), maxSlots = this.shipCarouselMaxSlots();
@@ -3252,6 +3315,58 @@ const game = {
     }
     UI.button(ctx, confirmRect, { label: selected ? "✓ 使用中" : "选择 USE", color: selected ? "#38d9a9" : "#4dabf7", active: true, font: 20, radius: 14 });
     ctx.fillStyle = "#4a90d9"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText("左右滑动或点击两侧机型切换", cx, confirmRect.y + confirmRect.h + 28);
+    ctx.textAlign = "left";
+  },
+  // RG2:机型选择页的"装备"视图——机身居中,8个槽位以放射状排布在四周(leader line 从机身引出),
+  //   槽位下方标注类型名+当前装备档位;所有机型共用同一套(和 drawShipSelect 里选中的机型无关,只是顺手拿来当展示模型)
+  drawShipEquip(ctx, sp, key) {
+    const info = this.shipInfoPanelRect(), cx = CONFIG.WIDTH / 2, a = this.equipSlotAnchor();
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#fff"; ctx.font = "bold 18px 'Segoe UI', sans-serif"; ctx.fillText("机装配置", cx, info.y + 30);
+    ctx.fillStyle = "#868e96"; ctx.font = "12px 'Segoe UI', sans-serif"; ctx.fillText("所有机型共用同一套装备 · 点击槽位切换", cx, info.y + 50);
+    this.drawShipPreview(ctx, a.cx, a.cy, sp);
+    CONFIG.gearSlots.forEach((slot, i) => {
+      const p = this.equipSlotNodePos(i);
+      const equippedKey = this.gearEquipped(slot.key), tier = this.gearTierOf(equippedKey);
+      const tierDef = tier ? CONFIG.gearTiers.find(t => t.key === tier) : null;
+      const owned = this.gearOwnsAny(slot.key), r = 26;
+      // 引出线:从机身边缘沿同一方向拉到槽位徽章
+      const lx0 = a.cx + Math.cos(p.angle) * 34, ly0 = a.cy + Math.sin(p.angle) * 18;
+      ctx.strokeStyle = UI.rgba(slot.color, owned ? 0.5 : 0.2); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(lx0, ly0); ctx.lineTo(p.x, p.y); ctx.stroke();
+      // 槽位徽章:圆形底 + 描边(装备了就用档位色描边,没装备用槽位主题色淡描边)+ 贴图/占位数字
+      ctx.save();
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = UI.rgba(slot.color, owned ? 0.22 : 0.08); ctx.fill();
+      ctx.lineWidth = equippedKey ? 2.5 : 1.5; ctx.strokeStyle = tierDef ? tierDef.color : UI.rgba(slot.color, owned ? 0.6 : 0.3); ctx.stroke();
+      ctx.restore();
+      const icon = ImageAssets.gear(slot.key);
+      if (icon) { ctx.save(); ctx.beginPath(); ctx.arc(p.x, p.y, r - 4, 0, Math.PI * 2); ctx.clip(); ImageAssets.draw(ctx, icon, p.x, p.y, (r - 4) * 2); ctx.restore(); }
+      else { ctx.fillStyle = slot.color; ctx.font = "bold 16px 'Segoe UI', sans-serif"; ctx.fillText(String(slot.world), p.x, p.y + 6); }
+      if (!owned) { ctx.fillStyle = "rgba(0,0,0,.55)"; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText("🔒", p.x, p.y + 5); }
+      // WW:标注统一放在槽位正下方(用户明确要求),槽位名 + 当前装备档位(或"未装备"/"未获得")
+      const labelY = p.y + r + 15;
+      ctx.fillStyle = "#dee2e6"; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillText(slot.name, p.x, labelY);
+      ctx.fillStyle = tierDef ? tierDef.color : (owned ? "#495057" : "#343a40"); ctx.font = "10px 'Segoe UI', sans-serif";
+      ctx.fillText(tierDef ? tierDef.name : (owned ? "未装备" : "未获得"), p.x, labelY + 13);
+    });
+    ctx.textAlign = "left";
+    if (this._equipPickerSlot) this.drawEquipPicker(ctx);
+  },
+  // RG2:点开的选择弹窗——浮在整页最上层,列出该槽位已拥有的档位(从低到高)+ 有装备时额外一行"卸下装备"
+  drawEquipPicker(ctx) {
+    const slotKey = this._equipPickerSlot, slot = this.gearSlotDef(slotKey), r = this.equipPickerRect(), opts = this.equipPickerOptions(slotKey);
+    ctx.fillStyle = "rgba(0,0,0,.5)"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+    UI.panel(ctx, r.x, r.y, r.w, r.h, 16, { accent: slot.color });
+    ctx.textAlign = "center"; ctx.fillStyle = slot.color; ctx.font = "bold 16px 'Segoe UI', sans-serif"; ctx.fillText(slot.name, r.x + r.w / 2, r.y + 30);
+    const equippedKey = this.gearEquipped(slotKey);
+    opts.forEach((itemKey, i) => {
+      const row = this.equipPickerRowRect(i), isCur = itemKey === equippedKey;
+      const label = itemKey ? this.gearItemName(itemKey) : "卸下装备";
+      const color = itemKey ? (CONFIG.gearTiers.find(t => t.key === this.gearTierOf(itemKey)) || {}).color || slot.color : "#868e96";
+      UI.button(ctx, row, { label: (isCur ? "✓ " : "") + label, color, active: isCur, font: 14, radius: 10 });
+    });
+    ctx.fillStyle = "rgba(255,255,255,.4)"; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillText("点击弹窗外区域关闭", r.x + r.w / 2, r.y + r.h - 10);
     ctx.textAlign = "left";
   },
 
