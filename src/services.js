@@ -142,7 +142,7 @@ const Settings = {
   key: "kzts_settings",
   // JJ:音效/音乐拆成独立音量+独立开关(原来共用一个 volume,音乐音效没法分别调)
   data: { sfxVolume: 0.8, musicVolume: 0.7, sound: true, music: true, haptics: true, diff: "normal", endlessDiff: "normal", ship: "balanced", autoNext: false, autoSpecial: false, autoLaser: false, hideWings: false, seenTutorial: false, controlMode: "drag", mpSide: "right", mpTop: 8,
-    gearOwned: {}, gearLoadout: {}, gearStarterGranted: false },   // RG7:机装系统——已拾取的装备(itemKey -> 持有数量,重铸要消耗多件同款) / 8槽位当前装备 / 是否已发过新手礼包(魂魄全套)
+    gearInventory: [], gearLoadout: {}, gearStarterGranted: false },   // RG9:机装系统——装备实例列表(每件独立随机主+3副属性) / 8槽位当前装备(slotKey -> 实例id) / 是否已发过新手礼包(魂能全套)
   load() {
     try {
       const s = JSON.parse(localStorage.getItem(this.key));
@@ -152,20 +152,34 @@ const Settings = {
         if (s.volume != null && s.musicVolume == null) s.musicVolume = s.volume;
         Object.assign(this.data, s);
         if (!CONFIG.endlessDifficulties[this.data.endlessDiff]) this.data.endlessDiff = "normal";
-        // RG7:老存档的 gearOwned 是数组(每件装备只记有没有,不记数量)——迁移成数量映射,每件按 1 件算
-        if (Array.isArray(this.data.gearOwned)) {
-          const map = {}; for (const k of this.data.gearOwned) map[k] = 1;
-          this.data.gearOwned = map;
-        }
-        // RG8:BUG修复——制式(t1)档位已经从 CONFIG.gearTiers 里删掉了,但老存档里可能还装备/持有着 t1 物品,
-        //   任何要查 CONFIG.gearTiers.find(...).color/.name 的地方碰到 t1 就会拿到 undefined 直接崩(图鉴机装页
-        //   点进去就卡死的根因)。统一在读档这一步把 t1 升级成精良(t2),存量数据不会再出现失效的档位引用。
-        const upT1 = (k) => k && k.endsWith("_t1") ? k.slice(0, -2) + "t2" : k;
-        if (this.data.gearLoadout) for (const slot of Object.keys(this.data.gearLoadout)) this.data.gearLoadout[slot] = upT1(this.data.gearLoadout[slot]);
-        if (this.data.gearOwned) {
-          const migrated = {};
-          for (const [k, n] of Object.entries(this.data.gearOwned)) { const nk = upT1(k); migrated[nk] = (migrated[nk] || 0) + n; }
-          this.data.gearOwned = migrated;
+        // RG9:老存档的机装是"槽位+品阶"固定值模型(数组或数量映射,没有独立实例),迁移到"每件独立随机实例"模型——
+        //   按老档记录的件数重新掉率式地各roll一份全新实例(旧的固定数值本来就要被这次改版淘汰,不强求数值对得上,
+        //   只保证换代后玩家手上的装备数量/装备中的槽位不丢);t1(制式)老物品统一按 t2(精良)品阶重roll,
+        //   这也顺带修掉了"CONFIG.gearTiers 里已经没有 t1 会导致图鉴机装页崩溃"的根因。
+        if (this.data.gearOwned != null && !Array.isArray(this.data.gearInventory)) this.data.gearInventory = [];
+        if (this.data.gearOwned != null && typeof game !== "undefined" && game.gearRollInstance) {
+          const upT1 = (t) => t === "t1" ? "t2" : t;
+          const counts = Array.isArray(this.data.gearOwned)
+            ? this.data.gearOwned.reduce((m, k) => { m[k] = (m[k] || 0) + 1; return m; }, {})
+            : this.data.gearOwned;
+          const bySlotTier = {};   // 记住每个"槽位+品阶"最后 roll 出来的一个实例 id,给下面重映射 gearLoadout 用
+          for (const [itemKey, n] of Object.entries(counts || {})) {
+            const [slotKey, tierRaw] = itemKey.split("_"); const tierKey = upT1(tierRaw);
+            if (!CONFIG.gearSlots.some(s => s.key === slotKey)) continue;
+            for (let i = 0; i < n; i++) {
+              const inst = game.gearRollInstance(slotKey, tierKey);
+              this.data.gearInventory.push(inst);
+              bySlotTier[slotKey + "_" + tierKey] = inst.id;
+            }
+          }
+          const newLoadout = {};
+          for (const [slotKey, oldItemKey] of Object.entries(this.data.gearLoadout || {})) {
+            if (!oldItemKey) continue;
+            const [sk, tierRaw] = oldItemKey.split("_"); const tierKey = upT1(tierRaw);
+            newLoadout[slotKey] = bySlotTier[sk + "_" + tierKey] || null;
+          }
+          this.data.gearLoadout = newLoadout;
+          delete this.data.gearOwned;
         }
       }
     } catch (e) {}

@@ -118,7 +118,7 @@ const game = {
     const order = this.shipSelectOrder(), i = order.indexOf(this.ship.key);
     this._shipIdx = i >= 0 ? i : 0; this._shipScroll = this._shipIdx; this._shipScrollTarget = this._shipIdx;
     this._shipDragging = false; this._shipDragMoved = false; this._shipSnapping = false;
-    this._shipViewMode = "info"; this._equipPickerSlot = null; this._reforgeSelection = {}; this._reforgeResult = null;   // RG2:每次进机型选择页都回到"详情"视图,不记上次切到装备页
+    this._shipViewMode = "info"; this._equipPickerSlot = null; this._reforgeSelection = []; this._reforgeResult = null;   // RG2:每次进机型选择页都回到"详情"视图,不记上次切到装备页
   },
   shipSelectBackRect() { return { x: 20, y: 28, w: 90, h: 36 }; },
   // RG2:详情/装备 二选一切换——放在返回按钮同一行的最右侧,和图鉴标签同一套 UI.button 视觉。
@@ -128,7 +128,8 @@ const game = {
   // RG4:去掉机身引出的连接线(太呆板)后改成内外双圈错开——8个方位角固定不变(45°等分),但按下标奇偶分到
   //   内圈/外圈两个不同半径:偶数下标(正上/右/下/左四个基本方位)落内圈更靠近机身,奇数下标(四个斜角)落外圈,
   //   两圈天然交错、互不遮挡,不需要额外算避让,比原来单圈+引出线更有层次感也更活泼。
-  equipSlotAnchor() { const info = this.shipInfoPanelRect(); return { cx: CONFIG.WIDTH / 2, cy: info.y + info.h / 2 + 6, inner: { rx: 98, ry: 82 }, outer: { rx: 188, ry: 156 } }; },
+  // RG9:飞机放正中间——机身不再偏移,直接画在锚点圆心;因此把内外圈半径整体放大,给正中间的机身腾出不重叠的空间
+  equipSlotAnchor() { const info = this.shipInfoPanelRect(); return { cx: CONFIG.WIDTH / 2, cy: info.y + info.h / 2 + 6, inner: { rx: 104, ry: 100 }, outer: { rx: 196, ry: 178 } }; },
   equipSlotNodePos(i) {
     const a = this.equipSlotAnchor(), angle = -Math.PI / 2 + i * (Math.PI * 2 / CONFIG.gearSlots.length), ring = i % 2 === 0 ? a.inner : a.outer;
     return { x: a.cx + Math.cos(angle) * ring.rx, y: a.cy + Math.sin(angle) * ring.ry, angle, cx: a.cx, cy: a.cy, inner: i % 2 === 0 };
@@ -137,12 +138,15 @@ const game = {
     for (let i = 0; i < CONFIG.gearSlots.length; i++) { const p = this.equipSlotNodePos(i); if (Math.hypot(px - p.x, py - p.y) <= 32) return i; }
     return null;
   },
-  gearOwnsAny(slotKey) { return CONFIG.gearTiers.some(t => this.gearOwns(this.gearItemKey(slotKey, t.key))); },
-  // RG7:装备仓库弹窗——每一格代表仓库里的一份装备(按 档位 分组,数量>1 时格子右下角标 ×N),额外加一格"卸下"
-  //   (只有当前有装备时才出现);点选项外的区域关闭不改动。3列网格,行数按格子数自动算。
+  gearOwnsAny(slotKey) { return this.gearInventory().some(inst => inst.slot === slotKey); },
+  // RG9:装备仓库弹窗——每一格是仓库里的一件独立实例(不再按槽位+品阶合并计数,同槽同品质的两件因为副属性不同
+  //   也分开摆),额外加一格"卸下"(只有当前有装备时才出现);点选项外的区域关闭不改动。3列网格,行数按格子数自动算。
+  //   最多展示 CONFIG.gearRoll 之外的一个硬上限(见 EQUIP_PICKER_MAX),超出部分按"主属性从高到低"排序后隐藏。
   equipPickerCells(slotKey) {
     if (!slotKey) return [];
-    const cells = this.gearWarehouseEntries(slotKey).map(e => ({ itemKey: e.itemKey, count: e.count }));
+    const EQUIP_PICKER_MAX = 11;   // 11件 + 1格卸下 = 12格(3列4行),够用且不会把弹窗撑爆
+    const list = this.gearSlotInventory(slotKey).slice(0, EQUIP_PICKER_MAX);
+    const cells = list.map(inst => ({ itemKey: inst.id, inst }));
     if (this.gearEquipped(slotKey)) cells.push({ itemKey: null, count: 0 });   // 末尾一格 = "卸下装备"
     return cells;
   },
@@ -881,8 +885,7 @@ const game = {
     this.farming = false;
     // RG7:结算即按本关所在战区判定机装掉落——BOSS关卡可能精良/魂魄双出,rollGearDrop 返回数组(0~2件);
     //   advance(自动进下一关)场景没有结算画面停留,改用横幅在下一关开场展示。
-    const dropKeys = this.rollGearDrop(this.world);
-    const drops = dropKeys.map(k => Object.assign({ key: k, name: this.gearItemName(k) }, this.gearAward(k)));
+    const drops = this.rollGearDrop(this.world).map(award => Object.assign({ key: award.instance.id, name: this.gearItemName(award.instance), isNew: true }, award));
     this._gearDrop = drops[0] || null;
     this._gearDropQueue = drops.slice(1);
     this._gearDropAll = drops;   // GG:结算页底部的常驻小结要列全部掉落,不能只看当前弹窗展示到哪一件(见 drawSettle)
@@ -943,27 +946,60 @@ const game = {
   bonusValue(key, prop, fallback = 0) { const b = CONFIG.bonuses[key]; return b && b[prop] ? this.bonusStacks(key) * b[prop] : fallback; },
   // RG:机装系统数值读取——不吃 bonus/chip 那套抽卡叠层逻辑,单纯"当前槽位装了哪件,查它固定的档位数值",
   //   itemKey 格式固定为 "槽位key_档位key"(如 "wing_t2"),槽位没装备时直接给 fallback(通常是0,不加成也不减益)
-  gearItemKey(slotKey, tierKey) { return slotKey + "_" + tierKey; },
-  gearEquipped(slotKey) { return (Settings.data.gearLoadout || {})[slotKey] || null; },
-  gearTierOf(itemKey) { return itemKey ? itemKey.split("_")[1] : null; },
+  // RG9:装备实例——每一件都有独立 id,不再用"槽位_品阶"字符串就能唯一确定一件装备(那套字符串 key 现在只用来
+  //   描述"这一类"装备,比如给掉落/新手礼包/兑换码指定要 roll 哪个槽位哪个品阶,不再直接当库存的主键用)。
+  gearNewId() { return "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); },
+  gearInventory() { return Settings.data.gearInventory || (Settings.data.gearInventory = []); },
+  gearInstanceById(id) { return id ? this.gearInventory().find(i => i.id === id) || null : null; },
+  gearSlotDef(slotKey) { return CONFIG.gearSlots.find(s => s.key === slotKey) || null; },
   // RG8:安全查表——CONFIG.gearTiers.find(...) 查不到(比如遇到已经删掉的档位 key)时不返回 undefined 崩掉调用方,
   //   给一个能正常显示的兜底档位定义。Settings.load() 已经把老存档的 t1 迁移成 t2,这里是双保险,不指望它天天触发。
   gearTierDef(tierKey) { return CONFIG.gearTiers.find(t => t.key === tierKey) || { key: tierKey || "?", name: "未知品阶", color: "#868e96" }; },
-  gearSlotOf(itemKey) { return itemKey ? itemKey.split("_")[0] : null; },
-  // RG7:库存改成数量映射(itemKey -> 件数)而不是有/无的布尔值——重铸要消耗多件同款,仓库视图也要能看出"这件有几份"
-  gearCount(itemKey) { return !!itemKey && ((Settings.data.gearOwned || {})[itemKey] || 0); },
-  gearOwns(itemKey) { return this.gearCount(itemKey) > 0; },
-  gearValue(slotKey, fallback = 0) {
-    const itemKey = this.gearEquipped(slotKey);
-    if (!itemKey) return fallback;
-    const tier = this.gearTierOf(itemKey), v = CONFIG.gearValues[slotKey];
-    return v && v[tier] != null ? v[tier] : fallback;
+  // RG9:掉落词条——主属性类型固定是这件装备自己的槽位,数值降到原表的 mainMult 再在区间内浮动;
+  //   3条副属性各自独立抽一个槽位类型(8选1,允许重复),数值约是"那个类型在这件装备品阶下的原表数值"的 subMult,
+  //   同样在区间内浮动。两件"同槽位同品质"的装备因此几乎不会长成同一个样子。
+  gearRollInstance(slotKey, tierKey) {
+    const roll = CONFIG.gearRoll, mainBase = (CONFIG.gearValues[slotKey] || {})[tierKey] || 0;
+    const main = mainBase * roll.mainMult * (roll.mainMin + this.rng() * (roll.mainMax - roll.mainMin));
+    const subs = [];
+    for (let i = 0; i < roll.subCount; i++) {
+      const subSlot = this.pick(CONFIG.gearSlots).key;
+      const subBase = (CONFIG.gearValues[subSlot] || {})[tierKey] || 0;
+      const value = subBase * roll.subMult * (roll.subMin + this.rng() * (roll.subMax - roll.subMin));
+      subs.push({ stat: subSlot, value });
+    }
+    return { id: this.gearNewId(), slot: slotKey, tier: tierKey, main, subs };
   },
-  gearSlotDef(slotKey) { return CONFIG.gearSlots.find(s => s.key === slotKey) || null; },
-  gearItemName(itemKey) {
-    if (!itemKey) return null;
-    const slot = this.gearSlotDef(this.gearSlotOf(itemKey)), tier = this.gearTierDef(this.gearTierOf(itemKey));
-    return slot && tier ? tier.name + slot.name : itemKey;
+  gearEquipped(slotKey) { return (Settings.data.gearLoadout || {})[slotKey] || null; },
+  gearEquippedInstance(slotKey) { return this.gearInstanceById(this.gearEquipped(slotKey)); },
+  // RG9:属性汇总——不再是"查这一个槽位装备了什么就完事",要扫全部8个槽位当前装备的实例:每件实例如果自己的槽位
+  //   正好等于要查的 slotKey,主属性算进去;它的3条副属性里凡是类型等于 slotKey 的,也都算进去。
+  //   一件装备的副属性因此可能是在给"别的槽位"加成,这也是"副属性完全任意"设计想要的效果。
+  gearValue(slotKey, fallback = 0) {
+    let total = 0, any = false;
+    for (const s of CONFIG.gearSlots) {
+      const inst = this.gearEquippedInstance(s.key);
+      if (!inst) continue;
+      if (inst.slot === slotKey) { total += inst.main; any = true; }
+      for (const sub of inst.subs) if (sub.stat === slotKey) { total += sub.value; any = true; }
+    }
+    return any ? total : fallback;
+  },
+  gearItemName(instOrId) {
+    const inst = typeof instOrId === "string" ? this.gearInstanceById(instOrId) : instOrId;
+    if (!inst) return null;
+    const slot = this.gearSlotDef(inst.slot), tier = this.gearTierDef(inst.tier);
+    return slot && tier ? tier.name + slot.name : null;
+  },
+  gearStatPct(v) { return (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%"; },
+  // RG9:紧凑属性摘要——主属性用装备自己的槽位名,副属性各自标注抽到的槽位名,供仓库/重铸/掉落弹窗展示
+  gearStatLines(inst) {
+    if (!inst) return { main: "", subs: [] };
+    const mainSlot = this.gearSlotDef(inst.slot);
+    return {
+      main: (mainSlot ? mainSlot.name : "?") + " " + this.gearStatPct(inst.main),
+      subs: inst.subs.map(s => { const sd = this.gearSlotDef(s.stat); return (sd ? sd.name : "?") + " " + this.gearStatPct(s.value); }),
+    };
   },
   // RG3:品阶视觉差异化——不只是描边变色,档位越高描边越粗、发光越强、外圈品阶点越多,魄能(t3)额外加一圈旋转的
   //   放射短线(像传统 RPG"传说品质"道具的光效),制式(t1)完全朴素无特效,三档拉开明显的"一眼看出档次"的区分度。
@@ -1029,131 +1065,130 @@ const game = {
       ctx.restore();
     }
   },
-  // RG7:拾取/掉落装备——数量+1(不再是"已有就忽略",多余的份数留着重铸用);新档位比当前已装备的高(或槽位空着)
-  //   就自动换上,不需要玩家每次都手动进机型选择装备
-  gearAward(itemKey) {
-    const slotKey = this.gearSlotOf(itemKey), tier = this.gearTierOf(itemKey);
-    const owned = Object.assign({}, Settings.data.gearOwned);
-    const isNew = !owned[itemKey];
-    owned[itemKey] = (owned[itemKey] || 0) + 1;
-    Settings.set("gearOwned", owned);
-    const rank = { t1: 1, t2: 2, t3: 3 };
-    const cur = this.gearEquipped(slotKey), curTier = this.gearTierOf(cur);
+  // RG9:拾取/掉落装备——roll 一件全新实例塞进仓库(不再是"数量+1"这种同款堆叠);新实例的品阶比当前装备的高
+  //   (或槽位空着)就自动换上,不需要玩家每次都手动进机型选择装备
+  gearAward(slotKey, tierKey) {
+    const inst = this.gearRollInstance(slotKey, tierKey);
+    this.gearInventory().push(inst);
+    Settings.save();
+    const rank = { t2: 1, t3: 2 };
+    const curInst = this.gearEquippedInstance(slotKey);
     let autoEquipped = false;
-    if (!cur || rank[tier] > (rank[curTier] || 0)) {
+    if (!curInst || rank[tierKey] > (rank[curInst.tier] || 0)) {
       const loadout = Object.assign({}, Settings.data.gearLoadout);
-      loadout[slotKey] = itemKey;
+      loadout[slotKey] = inst.id;
       Settings.set("gearLoadout", loadout);
       autoEquipped = true;
     }
-    return { isNew, autoEquipped };
+    return { instance: inst, autoEquipped };
   },
   // RG7:结算掉落判定——关卡所在战区(world)直接决定掉落哪个槽位(8战区对应8槽位);精良(t2)任何关卡结算都判定一次,
-  //   魂魄(t3)只有 BOSS 关卡才额外判定一次,两次判定互相独立,BOSS 关卡因此可能同一次结算精良/魂魄双出。
-  //   返回数组(可能 0/1/2 个 itemKey),不再是难度相关的单件掉落。
+  //   魂能(t3)只有 BOSS 关卡才额外判定一次,两次判定互相独立,BOSS 关卡因此可能同一次结算精良/魂能双出。
+  //   返回数组(可能 0/1/2 个 award 结果),不再是难度相关的单件掉落。
   rollGearDrop(worldN) {
     const slot = CONFIG.gearSlots[(worldN - 1 + CONFIG.gearSlots.length) % CONFIG.gearSlots.length];
     if (!slot) return [];
     const cfg = CONFIG.gearDrop, drops = [];
-    if (Math.random() < cfg.fineChance) drops.push(this.gearItemKey(slot.key, "t2"));
-    if (this.isBossLevel() && Math.random() < cfg.soulChance) drops.push(this.gearItemKey(slot.key, "t3"));
+    if (Math.random() < cfg.fineChance) drops.push(this.gearAward(slot.key, "t2"));
+    if (this.isBossLevel() && Math.random() < cfg.soulChance) drops.push(this.gearAward(slot.key, "t3"));
     return drops;
   },
   // RG8:新手礼包——每个用户首次启动免费拿一整套魂能(t3,顶档)装备,8槽位全配好。只发一次(存档标记)。
   grantStarterGear() {
     if (Settings.data.gearStarterGranted) return;
-    for (const s of CONFIG.gearSlots) this.gearAward(this.gearItemKey(s.key, "t3"));
+    for (const s of CONFIG.gearSlots) this.gearAward(s.key, "t3");
     Settings.set("gearStarterGranted", true);
   },
-  // RG8:兑换码——设置页里弹窗输入,不区分大小写/首尾空格;命中 "iclaude" 直接发一整套魂能(t3)装备,
-  //   刻意不做"只能领一次"的限制(用户明确要求可重复获取),每次都会给库存 +1 份(用来囤重铸材料也说得通)。
-  redeemGearCode() {
-    const raw = window.prompt("输入兑换码:", "");
-    if (raw == null) return;
-    const code = raw.trim().toLowerCase();
-    if (!code) return;
+  // RG9:兑换码——由游戏内的"兑换码"页面调用(见 drawRedeemCode),不再用浏览器 window.prompt;不区分大小写/
+  //   首尾空格;命中 "iclaude" 直接发一整套魂能(t3)装备,不做"只能领一次"的限制(用户明确要求可重复获取),
+  //   每次都是全新 roll 的8件,拿来囤重铸材料也说得通。返回是否兑换成功,调用方(UI)自己决定怎么提示。
+  redeemGearCode(raw) {
+    const code = (raw || "").trim().toLowerCase();
+    if (!code) return false;
     if (code === "iclaude") {
-      for (const s of CONFIG.gearSlots) this.gearAward(this.gearItemKey(s.key, "t3"));
+      for (const s of CONFIG.gearSlots) this.gearAward(s.key, "t3");
       Sound.powerup(); Haptics.powerup();
-      window.prompt("兑换成功!已获得一整套魂能装备(仅供查看,可关闭):", "");
-    } else {
-      window.prompt("兑换码无效(仅供查看,可关闭):", raw);
+      return true;
     }
+    return false;
   },
-  // RG7:装备仓库——某槽位当前拥有的所有(档位,件数)条目,档位从低到高排列,供仓库视图/重铸候选池使用
-  gearWarehouseEntries(slotKey) {
-    return CONFIG.gearTiers.map(t => ({ tierKey: t.key, itemKey: this.gearItemKey(slotKey, t.key), count: this.gearCount(this.gearItemKey(slotKey, t.key)) })).filter(e => e.count > 0);
+  // RG9:某槽位仓库里的全部实例,按品阶从高到低、同品阶内主属性从高到低排序——最好的装备排最前面,
+  //   仓库/装备弹窗数量多的时候玩家一眼就能看到"我这个槽位最强的是哪件"
+  gearSlotInventory(slotKey) {
+    const rank = { t2: 1, t3: 2 };
+    return this.gearInventory().filter(i => i.slot === slotKey).sort((a, b) => (rank[b.tier] - rank[a.tier]) || (b.main - a.main));
   },
-  // 全部槽位拉平的库存条目(重铸候选池用),每条附带槽位/档位定义方便渲染
+  // 兼容旧调用点的别名——某槽位仓库(未展开件数上限),供 drawGearCodex 统计用
+  gearWarehouseEntries(slotKey) { return this.gearSlotInventory(slotKey); },
+  // 全部槽位拉平的库存(重铸候选池用),按槽位、品阶、主属性排序,方便玩家找东西
   gearAllInventory() {
-    const out = [];
-    for (const s of CONFIG.gearSlots) for (const t of CONFIG.gearTiers) {
-      const itemKey = this.gearItemKey(s.key, t.key), count = this.gearCount(itemKey);
-      if (count > 0) out.push({ itemKey, slot: s, tier: t, count });
-    }
-    return out;
+    const rank = { t2: 1, t3: 2 };
+    return this.gearInventory().slice().sort((a, b) => {
+      if (a.slot !== b.slot) return CONFIG.gearSlots.findIndex(s => s.key === a.slot) - CONFIG.gearSlots.findIndex(s => s.key === b.slot);
+      return (rank[b.tier] - rank[a.tier]) || (b.main - a.main);
+    });
   },
-  // RG7:消耗指定数量(装备已装备着也照样能消耗——数量只是库存计数,和"装没装备"是两回事;
-  //   如果消耗后这个槽位的库存数归零且它正好是当前装备的那件,顺带卸下,不留一个"装备着但库存为0"的悬空状态)
-  gearConsume(itemKey, n = 1) {
-    const owned = Object.assign({}, Settings.data.gearOwned);
-    const left = Math.max(0, (owned[itemKey] || 0) - n);
-    if (left > 0) owned[itemKey] = left; else delete owned[itemKey];
-    Settings.set("gearOwned", owned);
-    if (left <= 0 && this.gearEquipped(this.gearSlotOf(itemKey)) === itemKey) {
+  // RG9:从仓库彻底移除这件实例(装备着也能消耗——库存和"装没装备"是两回事;如果它正好是当前装备的那件,
+  //   顺带卸下,不留一个"装备着但库存里已经找不到"的悬空引用)
+  gearConsume(instanceId) {
+    const inst = this.gearInstanceById(instanceId); if (!inst) return;
+    const list = this.gearInventory();
+    const idx = list.findIndex(i => i.id === instanceId);
+    if (idx >= 0) list.splice(idx, 1);
+    if (this.gearEquipped(inst.slot) === instanceId) {
       const loadout = Object.assign({}, Settings.data.gearLoadout);
-      loadout[this.gearSlotOf(itemKey)] = null;
+      loadout[inst.slot] = null;
       Settings.set("gearLoadout", loadout);
-    }
+    } else Settings.save();
   },
-  // RG7:重铸——3件同品质装备合成1件。3件槽位也一致则结果保底同槽位,否则结果槽位从8槽位随机抽;
+  // RG7:重铸——3件同品质装备合成1件全新 roll 的实例。3件槽位也一致则结果保底同槽位,否则结果槽位从8槽位随机抽;
   //   新品质有 gearReforge.successChance 概率是"当前品质+1"(判定成功),否则维持当前品质(判定失败,但仍然得到1件,不会空手而归);
-  //   已经是最高品质(数组最后一档)必定判定失败,因为没有更高档可升。消耗掉输入的3件后再把结果加进库存。
-  gearReforge(itemKeys) {
-    if (!itemKeys || itemKeys.length !== 3) return null;
-    const tiers = itemKeys.map(k => this.gearTierOf(k));
+  //   已经是最高品质必定判定失败,因为没有更高档可升。消耗掉输入的3件后再把结果加进库存。
+  gearReforge(instanceIds) {
+    if (!instanceIds || instanceIds.length !== 3) return null;
+    const insts = instanceIds.map(id => this.gearInstanceById(id));
+    if (insts.some(i => !i)) return null;
+    const tiers = insts.map(i => i.tier);
     if (new Set(tiers).size !== 1) return null;   // 品质必须一致
     const tierKey = tiers[0], tierIdx = CONFIG.gearTiers.findIndex(t => t.key === tierKey);
     if (tierIdx < 0) return null;
-    const slots = itemKeys.map(k => this.gearSlotOf(k));
+    const slots = insts.map(i => i.slot);
     const sameSlot = new Set(slots).size === 1;
     const canUpgrade = tierIdx < CONFIG.gearTiers.length - 1;
     const success = canUpgrade && Math.random() < CONFIG.gearReforge.successChance;
     const resultTierKey = success ? CONFIG.gearTiers[tierIdx + 1].key : tierKey;
     const resultSlotKey = sameSlot ? slots[0] : this.pick(CONFIG.gearSlots).key;
-    const resultKey = this.gearItemKey(resultSlotKey, resultTierKey);
-    for (const k of itemKeys) this.gearConsume(k, 1);
-    const award = this.gearAward(resultKey);
-    return { success, resultKey, resultName: this.gearItemName(resultKey), sameSlot, ...award };
+    for (const id of instanceIds) this.gearConsume(id);
+    const award = this.gearAward(resultSlotKey, resultTierKey);
+    return { success, resultKey: award.instance.id, resultName: this.gearItemName(award.instance), sameSlot, ...award };
   },
-  // RG7:重铸选材交互——点一格库存,数量在"往上加(直到这摞的库存上限或选满3件)"和"往下减"之间切换,
-  //   不需要额外的加减按钮,单纯点击就能凑出3件。reforgeSelectedKeys() 把选中的映射摊平成一份长度可能是0~3的数组。
-  reforgeSelectedTotal() { return Object.values(this._reforgeSelection).reduce((a, b) => a + b, 0); },
-  reforgeSelectedKeys() { const out = []; for (const [k, n] of Object.entries(this._reforgeSelection)) for (let i = 0; i < n; i++) out.push(k); return out; },
-  reforgeTapCell(itemKey) {
-    const avail = this.gearCount(itemKey), cur = this._reforgeSelection[itemKey] || 0, total = this.reforgeSelectedTotal();
-    if (cur > 0 && (cur >= avail || total >= 3)) {
-      const next = cur - 1;
-      if (next > 0) this._reforgeSelection[itemKey] = next; else delete this._reforgeSelection[itemKey];
-      return;
-    }
-    if (total >= 3 || cur >= avail) return;
-    this._reforgeSelection[itemKey] = cur + 1;
+  // RG9:重铸选材交互——每一件都是独立实例,选中就是把它的 id 塞进 _reforgeSelection 数组(上限3个),
+  //   再点一次同一件 = 取消选中。不再需要"这一摞选了几件"的计数逻辑,直接按 id 判断在不在里面。
+  reforgeSelectedTotal() { return this._reforgeSelection.length; },
+  reforgeSelectedKeys() { return this._reforgeSelection; },
+  reforgeTapCell(instanceId) {
+    const idx = this._reforgeSelection.indexOf(instanceId);
+    if (idx >= 0) { this._reforgeSelection.splice(idx, 1); return; }
+    if (this._reforgeSelection.length >= 3) return;
+    this._reforgeSelection.push(instanceId);
   },
   reforgeCanExecute() {
-    const keys = this.reforgeSelectedKeys();
-    if (keys.length !== 3) return false;
-    return new Set(keys.map(k => this.gearTierOf(k))).size === 1;
+    if (this._reforgeSelection.length !== 3) return false;
+    const insts = this._reforgeSelection.map(id => this.gearInstanceById(id));
+    if (insts.some(i => !i)) return false;
+    return new Set(insts.map(i => i.tier)).size === 1;
   },
   reforgeExecute() {
     if (!this.reforgeCanExecute()) return;
-    this._reforgeResult = this.gearReforge(this.reforgeSelectedKeys());
-    this._reforgeSelection = {};
+    this._reforgeResult = this.gearReforge(this._reforgeSelection);
+    this._reforgeSelection = [];
   },
   // RG7:重铸页面几何——不复用机型选择的展示框布局,单独一套(返回按钮同款位置/重选按钮对称放右上/网格居中/底部执行按钮)
   shipReforgeBackRect() { return { x: 20, y: 28, w: 90, h: 36 }; },
   shipReforgeResetRect() { return { x: CONFIG.WIDTH - 110, y: 28, w: 90, h: 36 }; },
-  reforgeInventoryList() { return this.gearAllInventory(); },
+  // RG9:重铸候选池最多展示这么多件(4列×5行),仓库屯多了会提示"建议先合成消耗"而不是硬撑一个超长滚动列表
+  REFORGE_GRID_MAX: 20,
+  reforgeInventoryList() { return this.gearAllInventory().slice(0, this.REFORGE_GRID_MAX); },
   reforgeCellRect(i) {
     const cols = 4, cellW = 108, cellH = 118, gap = 10, gridW = cols * cellW + (cols - 1) * gap;
     const col = i % cols, row = Math.floor(i / cols);
@@ -1163,11 +1198,11 @@ const game = {
   reforgePointerDown(px, py) {
     const inR = (r) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
     if (this._reforgeResult) { this._reforgeResult = null; return; }   // 结果弹窗开着时,点哪都先关它,不响应下面任何操作
-    if (inR(this.shipReforgeBackRect())) { this._shipViewMode = "gear"; this._reforgeSelection = {}; return; }
-    if (inR(this.shipReforgeResetRect())) { this._reforgeSelection = {}; return; }
+    if (inR(this.shipReforgeBackRect())) { this._shipViewMode = "gear"; this._reforgeSelection = []; return; }
+    if (inR(this.shipReforgeResetRect())) { this._reforgeSelection = []; return; }
     if (inR(this.shipReforgeExecuteRect())) { if (this.reforgeCanExecute()) this.reforgeExecute(); return; }
     const list = this.reforgeInventoryList();
-    for (let i = 0; i < list.length; i++) { if (inR(this.reforgeCellRect(i))) { this.reforgeTapCell(list[i].itemKey); return; } }
+    for (let i = 0; i < list.length; i++) { if (inR(this.reforgeCellRect(i))) { this.reforgeTapCell(list[i].id); return; } }
   },
   bonusHpGain(key) { return (this._bonusHpGain && this._bonusHpGain[key]) || 0; },
   adrenalineValue(prop) {
@@ -3543,15 +3578,14 @@ const game = {
     ctx.strokeStyle = UI.rgba(this.gearRingColor(false), .4);
     ctx.beginPath(); ctx.ellipse(a.cx, a.cy, a.outer.rx, a.outer.ry, 0, 0, Math.PI * 2); ctx.stroke();
     ctx.setLineDash([]); ctx.restore();
-    // RG8:BUG修复——缩小机身(72%)那版实测机头还是会顶到正上方内圈徽章;直接把机身整体下移一截(而不是只缩小),
-    //   下移量在缩放变换之外单独控制,不随缩放比例打折扣,效果更直接可控。
-    const shipY = a.cy + 22;
+    // RG9:机身放在锚点正中间(用户明确要求"飞机放在正中间"),不再靠下移躲徽章——改用放大内外圈半径来腾出空间
+    const shipY = a.cy;
     ctx.save(); ctx.translate(a.cx, shipY); ctx.scale(0.72, 0.72); ctx.translate(-a.cx, -shipY);
     this.drawShipPreview(ctx, a.cx, shipY, sp);
     ctx.restore();
     CONFIG.gearSlots.forEach((slot, i) => {
       const p = this.equipSlotNodePos(i);
-      const equippedKey = this.gearEquipped(slot.key), tier = this.gearTierOf(equippedKey);
+      const equippedInst = this.gearEquippedInstance(slot.key), tier = equippedInst ? equippedInst.tier : null;
       const tierDef = tier ? this.gearTierDef(tier) : null;
       const owned = this.gearOwnsAny(slot.key), r = p.inner ? 23 : 27;   // 内圈稍小/外圈稍大,强化"两层"的层次感
       this.drawGearBadge(ctx, p.x, p.y, r, slot, tier, owned, this.gearRingColor(p.inner));
@@ -3580,14 +3614,17 @@ const game = {
     const equippedKey = this.gearEquipped(slotKey);
     const cells = this.equipPickerCells(slotKey);
     cells.forEach((cell, i) => {
-      const cr = this.equipPickerCellRect(slotKey, i), cx = cr.x + cr.w / 2, cy = cr.y + cr.h / 2 - 6;
+      const cr = this.equipPickerCellRect(slotKey, i), cx = cr.x + cr.w / 2, cy = cr.y + cr.h / 2 - 10;
       const isCur = cell.itemKey === equippedKey;
       if (isCur) { ctx.save(); ctx.strokeStyle = "#38d9a9"; ctx.lineWidth = 2; UI.roundRect(ctx, cr.x, cr.y, cr.w, cr.h, 12); ctx.stroke(); ctx.restore(); }
       if (cell.itemKey) {
-        this.drawGearBadge(ctx, cx, cy, 26, slot, this.gearTierOf(cell.itemKey), true);
-        ctx.fillStyle = "#dee2e6"; ctx.font = "10px 'Segoe UI', sans-serif"; ctx.fillText(this.gearTierDef(this.gearTierOf(cell.itemKey)).name, cx, cr.y + cr.h - 18);
-        if (cell.count > 1) { ctx.fillStyle = "#868e96"; ctx.font = "10px 'Segoe UI', sans-serif"; ctx.fillText("×" + cell.count, cx, cr.y + cr.h - 6); }
-        if (isCur) { ctx.fillStyle = "#38d9a9"; ctx.font = "9px 'Segoe UI', sans-serif"; ctx.fillText("装备中", cx, cr.y + 16); }
+        const inst = cell.inst;
+        this.drawGearBadge(ctx, cx, cy, 22, slot, inst.tier, true);
+        ctx.fillStyle = "#dee2e6"; ctx.font = "9px 'Segoe UI', sans-serif"; ctx.fillText(this.gearStatPct(inst.main), cx, cr.y + cr.h - 22);
+        // RG9:副属性用3个小色点表示(取该副属性槽位的主题色),悬停/点击查看具体数值(空间有限,先给"一眼看差异"的信号)
+        const dotGap = 10, dotX0 = cx - dotGap;
+        inst.subs.forEach((s, si) => { const sd = this.gearSlotDef(s.stat); ctx.beginPath(); ctx.arc(dotX0 + si * dotGap, cr.y + cr.h - 12, 3, 0, Math.PI * 2); ctx.fillStyle = sd ? sd.color : "#868e96"; ctx.fill(); });
+        if (isCur) { ctx.fillStyle = "#38d9a9"; ctx.font = "9px 'Segoe UI', sans-serif"; ctx.fillText("装备中", cx, cr.y + 14); }
       } else {
         // 卸下格:空心虚线圈,和"未装备"的空槽位视觉呼应
         ctx.save(); ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
@@ -3614,15 +3651,16 @@ const game = {
     if (!list.length) {
       ctx.fillStyle = "#495057"; ctx.font = "15px 'Segoe UI', sans-serif"; ctx.fillText("仓库空空如也,先去关卡里刷些装备吧", cx, 300);
     } else {
-      list.forEach((entry, i) => {
-        const r = this.reforgeCellRect(i), sel = this._reforgeSelection[entry.itemKey] || 0;
-        UI.panel(ctx, r.x, r.y, r.w, r.h, 10, { accent: entry.tier.color });
-        if (sel > 0) { ctx.save(); ctx.strokeStyle = "#38d9a9"; ctx.lineWidth = 2; UI.roundRect(ctx, r.x, r.y, r.w, r.h, 10); ctx.stroke(); ctx.restore(); }
+      list.forEach((inst, i) => {
+        const r = this.reforgeCellRect(i), sel = this._reforgeSelection.includes(inst.id);
+        const slotDef = this.gearSlotDef(inst.slot), tierDef = this.gearTierDef(inst.tier);
+        UI.panel(ctx, r.x, r.y, r.w, r.h, 10, { accent: tierDef.color });
+        if (sel) { ctx.save(); ctx.strokeStyle = "#38d9a9"; ctx.lineWidth = 2; UI.roundRect(ctx, r.x, r.y, r.w, r.h, 10); ctx.stroke(); ctx.restore(); }
         const bx = r.x + r.w / 2, by = r.y + 38;
-        this.drawGearBadge(ctx, bx, by, 26, entry.slot, entry.tier.key, true);
-        ctx.fillStyle = "#dee2e6"; ctx.font = "10px 'Segoe UI', sans-serif"; ctx.fillText(entry.slot.name, bx, r.y + 76);
-        ctx.fillStyle = entry.tier.color; ctx.font = "10px 'Segoe UI', sans-serif"; ctx.fillText(entry.tier.name + " ×" + entry.count, bx, r.y + 90);
-        if (sel > 0) { ctx.fillStyle = "#38d9a9"; ctx.font = "bold 11px 'Segoe UI', sans-serif"; ctx.fillText("已选 " + sel, bx, r.y + 106); }
+        this.drawGearBadge(ctx, bx, by, 26, slotDef, inst.tier, true);
+        ctx.fillStyle = "#dee2e6"; ctx.font = "10px 'Segoe UI', sans-serif"; ctx.fillText(slotDef.name, bx, r.y + 76);
+        ctx.fillStyle = tierDef.color; ctx.font = "10px 'Segoe UI', sans-serif"; ctx.fillText(tierDef.name + " " + this.gearStatPct(inst.main), bx, r.y + 90);
+        if (sel) { ctx.fillStyle = "#38d9a9"; ctx.font = "bold 11px 'Segoe UI', sans-serif"; ctx.fillText("已选中", bx, r.y + 106); }
       });
     }
 
@@ -3635,7 +3673,7 @@ const game = {
   },
   drawReforgeResult(ctx) {
     const r = this._reforgeResult, cx = CONFIG.WIDTH / 2, cy = CONFIG.HEIGHT / 2;
-    const slot = this.gearSlotDef(this.gearSlotOf(r.resultKey)), tierDef = this.gearTierDef(this.gearTierOf(r.resultKey));
+    const resultInst = r.instance, slot = this.gearSlotDef(resultInst.slot), tierDef = this.gearTierDef(resultInst.tier);
     ctx.fillStyle = "rgba(0,0,0,.74)"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
     const cardW = 300, cardH = 300, cardX = cx - cardW / 2, cardY = cy - cardH / 2;
     UI.roundRect(ctx, cardX, cardY, cardW, cardH, 20); ctx.fillStyle = "rgba(8,12,20,.96)"; ctx.fill();
@@ -3643,7 +3681,7 @@ const game = {
     ctx.textAlign = "center";
     ctx.fillStyle = r.success ? "#38d9a9" : "#ff6b6b"; ctx.font = "bold 26px 'Segoe UI', sans-serif";
     ctx.fillText(r.success ? "重铸成功!" : "重铸失败", cx, cardY + 44);
-    this.drawGearBadge(ctx, cx, cardY + 130, 50, slot, this.gearTierOf(r.resultKey), true);
+    this.drawGearBadge(ctx, cx, cardY + 130, 50, slot, resultInst.tier, true);
     ctx.fillStyle = "#fff"; ctx.font = "bold 18px 'Segoe UI', sans-serif"; ctx.fillText(r.resultName, cx, cardY + 206);
     ctx.fillStyle = tierDef.color; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText(tierDef.name + " 品阶", cx, cardY + 226);
     ctx.fillStyle = "#868e96"; ctx.font = "12px 'Segoe UI', sans-serif";
@@ -3747,8 +3785,8 @@ const game = {
   drawGearDropPopup(ctx) {
     const g = this._gearDrop; if (!g) return;
     const cx = CONFIG.WIDTH / 2, cy = CONFIG.HEIGHT / 2;
-    const slot = this.gearSlotDef(this.gearSlotOf(g.key)), tierKey = this.gearTierOf(g.key);
-    const tierDef = this.gearTierDef(tierKey);
+    const inst = g.instance, slot = this.gearSlotDef(inst.slot), tierKey = inst.tier;
+    const tierDef = this.gearTierDef(tierKey), stats = this.gearStatLines(inst);
     ctx.fillStyle = "rgba(0,0,0,.74)"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
     const cardW = 320, cardH = 360, cardX = cx - cardW / 2, cardY = cy - cardH / 2;
     // 品阶越高,卡片本身也叠一层更强的外发光,呼应徽章的发光强度,让"这次开出好东西了"从卡片轮廓就能感觉到
@@ -3760,14 +3798,14 @@ const game = {
     UI.panel(ctx, cardX, cardY, cardW, cardH, 22, { accent: tierDef.color, lineWidth: 2.5 });
     ctx.textAlign = "center";
     ctx.fillStyle = tierDef.color; ctx.font = "bold 14px 'Segoe UI', sans-serif";
-    ctx.fillText(g.isNew ? "◆ 获得新机装 ◆" : "◆ 机装掉落(重复)◆", cx, cardY + 32);
-    this.drawGearBadge(ctx, cx, cardY + 138, 58, slot, tierKey, true);
-    ctx.fillStyle = "#fff"; ctx.font = "bold 22px 'Segoe UI', sans-serif"; ctx.fillText(slot.name, cx, cardY + 224);
-    ctx.fillStyle = tierDef.color; ctx.font = "bold 16px 'Segoe UI', sans-serif"; ctx.fillText(tierDef.name + " 品阶", cx, cardY + 250);
-    ctx.fillStyle = "#adb5bd"; ctx.font = "13px 'Segoe UI', sans-serif";
-    ctx.fillText("第" + slot.world + "战区掉落 · " + slot.desc, cx, cardY + 274);
+    ctx.fillText("◆ 获得新机装 ◆", cx, cardY + 32);
+    this.drawGearBadge(ctx, cx, cardY + 118, 52, slot, tierKey, true);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 20px 'Segoe UI', sans-serif"; ctx.fillText(slot.name, cx, cardY + 196);
+    ctx.fillStyle = tierDef.color; ctx.font = "bold 14px 'Segoe UI', sans-serif"; ctx.fillText(tierDef.name + " 品阶 · " + stats.main, cx, cardY + 216);
+    ctx.fillStyle = "#adb5bd"; ctx.font = "11px 'Segoe UI', sans-serif";
+    ctx.fillText("副: " + stats.subs.join(" · "), cx, cardY + 234);
     ctx.fillStyle = g.autoEquipped ? "#38d9a9" : "#868e96"; ctx.font = "bold 14px 'Segoe UI', sans-serif";
-    ctx.fillText(g.autoEquipped ? "已自动装备" : (g.isNew ? "已存入机装库 · 可在机型选择手动装备" : "重复获得(已拥有,未替换当前装备)"), cx, cardY + 302);
+    ctx.fillText(g.autoEquipped ? "已自动装备" : "已存入机装库 · 可在机型选择手动装备", cx, cardY + 260);
     // RG7:BOSS关卡精良+魂魄双出时,提示还有下一件没看,点一下先翻到下一件而不是直接关闭
     ctx.fillStyle = "rgba(255,255,255,.4)"; ctx.font = "12px 'Segoe UI', sans-serif";
     ctx.fillText(this._gearDropQueue.length ? "点击查看下一件掉落(" + (this._gearDropAll.length - this._gearDropQueue.length) + "/" + this._gearDropAll.length + ")" : "点击任意位置关闭", cx, cardY + cardH - 18);
@@ -3779,7 +3817,7 @@ const game = {
     ctx.fillText("机装系统 · 8槽位对应8战区,关卡结算有几率掉落对应装备 · 点击整行打开装备仓库", 18, 120);
     CONFIG.gearSlots.forEach((slot, i) => {
       const r = this.gearRowRect(i);
-      const equippedKey = this.gearEquipped(slot.key), equippedTier = this.gearTierOf(equippedKey);
+      const equippedInst = this.gearEquippedInstance(slot.key), equippedTier = equippedInst ? equippedInst.tier : null;
       const tierDef = equippedTier ? this.gearTierDef(equippedTier) : null;
       UI.panel(ctx, r.x, r.y, r.w, r.h, 12, { accent: slot.color });
       // RG3:圆形徽章复用 drawGearBadge(和机型选择的装备图一致的品阶视觉:描边粗细/发光/魄能放射线/品阶点)——
@@ -3791,12 +3829,14 @@ const game = {
       ctx.fillText(slot.name + "  ·  第" + slot.world + "战区掉落", tx, r.y + 24);
       ctx.fillStyle = "#adb5bd"; ctx.font = "12px 'Segoe UI', sans-serif";
       ctx.fillText(slot.desc, tx, r.y + 42);
-      if (equippedKey) { ctx.fillStyle = tierDef.color; ctx.font = "bold 14px 'Segoe UI', sans-serif"; ctx.fillText("已装备:" + this.gearItemName(equippedKey), tx, r.y + 64); }
+      if (equippedInst) { ctx.fillStyle = tierDef.color; ctx.font = "bold 14px 'Segoe UI', sans-serif"; ctx.fillText("已装备:" + this.gearItemName(equippedInst) + " " + this.gearStatPct(equippedInst.main), tx, r.y + 64); }
       else { ctx.fillStyle = "#495057"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText("未装备", tx, r.y + 64); }
-      // RG7:仓库数量而不是"有没有"——直观看出这个槽位屯了几份,重铸要用的时候心里有数
-      const entries = this.gearWarehouseEntries(slot.key);
+      // RG9:仓库件数而不是"有没有"——按品阶分组统计,直观看出这个槽位屯了几份,重铸要用的时候心里有数
+      const inv = this.gearSlotInventory(slot.key);
+      const byTier = {}; inv.forEach(i => { byTier[i.tier] = (byTier[i.tier] || 0) + 1; });
       ctx.textAlign = "right"; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillStyle = "#868e96";
-      ctx.fillText(entries.length ? "仓库 " + entries.map(e => this.gearTierDef(e.tierKey).name + "×" + e.count).join(" ") : "尚未获得", r.x + r.w - 14, r.y + r.h - 14);
+      const summary = CONFIG.gearTiers.map(t => byTier[t.key] ? t.name + "×" + byTier[t.key] : null).filter(Boolean).join(" ");
+      ctx.fillText(summary || "尚未获得", r.x + r.w - 14, r.y + r.h - 14);
       ctx.textAlign = "left";
     });
   },
@@ -4292,7 +4332,7 @@ const game = {
       if (s) { const ok = SaveData.importAll(s); this.topScores = []; Sound.hit(); if (!ok) window.prompt("导入失败,内容不是合法的存档文本(仅供查看,可关闭):", s); }
       return;
     }
-    if (inR(R.redeemCode)) { this._resetArmed = false; this.redeemGearCode(); return; }
+    if (inR(R.redeemCode)) { this._resetArmed = false; if (window.RedeemUI) RedeemUI.open(); return; }
     if (inR(R.reset))   {   // 完全重置:需二次确认
       if (this._resetArmed) { Progress.clearAll(); Leaderboard.clearAll(); EndlessBoard.clearAll(); EndlessBoardLite.clearAll(); ChallengeHistory.clearAll(); Achievements.clearAll(); this.topScores = []; this._resetArmed = false; Sound.hit(); }
       else this._resetArmed = true;
