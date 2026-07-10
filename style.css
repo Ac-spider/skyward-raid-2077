@@ -7,10 +7,6 @@ html, body {
   }
   #stage { position: relative; background: #000; box-shadow: 0 0 40px rgba(0,150,255,.15); }
   canvas { display: block; }
-  #hint {
-    position: absolute; left: 0; right: 0; bottom: 8px;
-    text-align: center; color: #4a90d9; font-size: 12px; opacity: .6; pointer-events: none;
-  }
   /* GG:联机浮窗重做 —— 呼应游戏内 UI.panel/UI.button/UI.roundButton 那套"玻璃质感+渐变+发光描边"的视觉语言,
      不再是一块普通的浅蓝方框。收起时只在右边缘露出一个会呼吸发光的圆形信标(仿 roundButton 的玻璃圆钮),
      点一下才展开成完整面板;宽度铺满 #stage 并用 flex 靠右对齐,面板的百分比宽度相对画布算,不是视口 */
