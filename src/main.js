@@ -9,20 +9,33 @@ const stars = {
   draw(ctx) { ctx.fillStyle = "rgba(255,255,255,.25)"; for (const p of this.items) ctx.fillRect(p.x, p.y, p.r, p.r * 3); },
 };
 
-// GG13:开屏鸣谢/公益提示——素材(尤其非关键的世界背景/BOSS图)仍在后台加载时,给一段更充裕的缓冲期,
-//   黑底白字,渐入→停留→渐出,叠在已经跑起来的标题画面之上做交叉淡出(不是先黑屏卡住再硬切标题页那种机械感)。
-//   停留时长取"最短展示时间"和"全部素材真正加载完"两者的较大值,同时设安全上限,防止极端情况下卡死在开屏页出不去。
+// GG13:开屏鸣谢/公益提示——黑底白字,渐入→停留→渐出,叠在已经跑起来的标题画面之上做交叉淡出。
+// GG18:与贴图加载页合二为一——页面自带真实加载进度条(数据来自 ImageAssets.loadProgress),
+//   仍可点击跳过,但进度条下方写明提前跳过的后果。
+// GG21:去掉"加载太久强制进入"的安全网——玩家没有主动跳过,进度条没走满就不自动进入首页,哪怕加载再久也一直停在这一页;
+//   decode 本身带重试且必定落定(见 assets.js waitImageSettle/decode),不存在"永远卡在 99%"的情况,所以不需要兜底上限。
 const splash = {
   active: true, t: 0, exiting: false, exitT: 0,
-  fadeIn: 0.55, minHold: 2.2, maxHold: 6.5, fadeOut: 0.6, ready: false,
+  fadeIn: 0.55, minHold: 2.2, fadeOut: 0.6, ready: false,
+  prog: 0,   // 展示用进度(向真实进度平滑趋近,不做跳变)
   dots: Array.from({ length: 26 }, () => ({ x: Math.random(), y: Math.random(), s: 0.4 + Math.random() * 0.9, ph: Math.random() * Math.PI * 2 })),
 };
 function easeInOut(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+// GG21:进度条填充色随进度分三段插值:蓝(刚开始)→青(过半)→绿(接近完成),给"还早/快好了"一个直观的颜色信号
+function progressColor(frac) {
+  const BLUE = [77, 171, 247], CYAN = [102, 217, 239], GREEN = [56, 217, 169];
+  const mix = (a, b, k) => [0, 1, 2].map(i => Math.round(a[i] + (b[i] - a[i]) * k));
+  return frac < 0.5 ? mix(BLUE, CYAN, frac * 2) : mix(CYAN, GREEN, (frac - 0.5) * 2);
+}
 function updateSplash(dt) {
   if (!splash.active) return;
   splash.t += dt;
+  const lp = ImageAssets.loadProgress;
+  const target = splash.ready ? 1 : (lp.total ? lp.done / lp.total : 0);
+  splash.prog += (target - splash.prog) * Math.min(1, dt * 5);   // 平滑追进度,加载完成后自然滑向 100%
   if (!splash.exiting) {
-    if (splash.t >= splash.fadeIn + splash.minHold && (splash.ready || splash.t >= splash.maxHold)) splash.exiting = true;
+    // 进度条要"走满"再退场:必须 ready(全部贴图落定)且展示进度追到 99% 以上,不设时长上限——玩家不跳过就一直等
+    if (splash.t >= splash.fadeIn + splash.minHold && splash.ready && splash.prog > 0.99) splash.exiting = true;
   } else {
     splash.exitT += dt;
     if (splash.exitT >= splash.fadeOut) splash.active = false;
@@ -48,22 +61,95 @@ function drawSplash(ctx) {
   ctx.save();
   ctx.globalAlpha = textAlpha;
   ctx.textAlign = "center";
+  // GG25:适龄提示图标——常驻右上角,和鸣谢文字同一节奏渐入,不单独抢注意力
+  const ageIcon = ImageAssets.ready(ImageAssets.ageRatingSrc);
+  if (ageIcon) {
+    // GG26:面积放大到原来的 5 倍(线性边长 ×√5),经验证压缩版在此尺寸下和原图肉眼无差异,可以放心用
+    // 右边距从 14 加到 36——放大后宽度够到联机浮标(mp-peek,默认挂在右边缘 top:8%)的常驻区域,留够间距避免遮挡
+    const iconH = 46 * Math.sqrt(5), iconW = iconH * ageIcon.naturalWidth / ageIcon.naturalHeight;
+    ctx.drawImage(ageIcon, W - 36 - iconW, 14, iconW, iconH);
+  }
+  // ① 开发团队鸣谢(上段)
   ctx.fillStyle = "rgba(255,255,255,.5)"; ctx.font = "13px 'Segoe UI', sans-serif";
-  ctx.fillText("开发团队 DEVELOPED BY", cx, H * 0.30);
+  ctx.fillText("开发团队 DEVELOPED BY", cx, H * 0.20);
   ctx.fillStyle = "#fff"; ctx.font = "bold 22px 'Segoe UI', sans-serif";
-  ctx.fillText("Allec时", cx, H * 0.30 + 38);
-  ctx.fillText("LvxSeraph", cx, H * 0.30 + 72);
+  ctx.fillText("Allec时", cx, H * 0.20 + 38);
+  ctx.fillText("LvxSeraph", cx, H * 0.20 + 72);
+  // ② 健康游戏忠告(中段)——GG18:加标题 + 左右装饰短线,正文从 14px 放大到 17px、行距拉开
+  const advY = H * 0.44;
+  ctx.fillStyle = "rgba(255,255,255,.92)"; ctx.font = "bold 20px 'Segoe UI', sans-serif";
+  ctx.fillText("健 康 游 戏 忠 告", cx, advY);
+  ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 1;
+  const tw = ctx.measureText("健 康 游 戏 忠 告").width / 2 + 22;
+  ctx.beginPath();
+  ctx.moveTo(cx - tw - 56, advY - 7); ctx.lineTo(cx - tw, advY - 7);
+  ctx.moveTo(cx + tw, advY - 7); ctx.lineTo(cx + tw + 56, advY - 7);
+  ctx.stroke();
   const psa = ["抵制不良游戏，拒绝盗版游戏。", "注意自我保护，谨防受骗上当。", "适度游戏益脑，沉迷游戏伤身。", "合理安排时间，享受健康生活。"];
-  ctx.font = "14px 'Segoe UI', sans-serif"; ctx.fillStyle = "rgba(255,255,255,.72)";
-  const psaY0 = H * 0.62;
-  psa.forEach((line, i) => ctx.fillText(line, cx, psaY0 + i * 27));
+  ctx.font = "17px 'Segoe UI', sans-serif"; ctx.fillStyle = "rgba(255,255,255,.82)";
+  psa.forEach((line, i) => ctx.fillText(line, cx, advY + 44 + i * 34));
+  // ③ 贴图加载进度条(下段)——真实进度,全部加载完才自动进入
+  // GG21:视觉升级——玻璃质感容器(渐变+高光+描边)、填充色随进度从蓝→青→绿过渡、内部叠一道从后向前扫的高光波
+  const barW = 300, barH = 10, barX = cx - barW / 2, barY = H * 0.775;
+  const frac = clamp(splash.prog, 0, 1), done = splash.ready && frac > 0.995;
+  const barColor = progressColor(frac);
+  ctx.fillStyle = done ? "rgba(148,232,180,.95)" : "rgba(255,255,255,.62)";
+  ctx.font = "12px 'Segoe UI', sans-serif";
+  ctx.fillText(done ? "加载完成，即将进入游戏…" : "贴图加载中 " + Math.floor(frac * 100) + "%", cx, barY - 12);
+  // 玻璃容器:外层淡淡的发光轮廓 + 内层竖向渐变模拟玻璃反光
+  ctx.save();
+  ctx.shadowColor = "rgba(255,255,255,.18)"; ctx.shadowBlur = 6;
+  UI.roundRect(ctx, barX, barY, barW, barH, barH / 2);
+  const trackGrad = ctx.createLinearGradient(barX, barY, barX, barY + barH);
+  trackGrad.addColorStop(0, "rgba(255,255,255,.16)");
+  trackGrad.addColorStop(0.5, "rgba(255,255,255,.05)");
+  trackGrad.addColorStop(1, "rgba(255,255,255,.13)");
+  ctx.fillStyle = trackGrad; ctx.fill();
   ctx.restore();
-  // GG17:跳过提示——延迟 0.9s 才淡入,不抢开场那半秒的注意力;点按/点击画布任意位置跳过(见下方 pointerdown 监听)
-  const hintAlpha = clamp((splash.t - 0.9) / 0.5, 0, 1) * (1 - exitK);
+  if (frac > 0.01) {
+    const fillW = Math.max(barH, barW * frac);
+    ctx.save();
+    UI.roundRect(ctx, barX, barY, barW, barH, barH / 2); ctx.clip();   // 裁到药丸形状,填充/高光/波不会溢出圆角
+    // 填充色:随进度在蓝→青→绿之间过渡,直观反映"还早/快好了/完成"三个阶段
+    ctx.fillStyle = "rgb(" + barColor.join(",") + ")";
+    ctx.fillRect(barX, barY, fillW, barH);
+    // 玻璃高光:上半段叠一层更亮的渐变,给填充部分的"液体感"
+    const glossGrad = ctx.createLinearGradient(barX, barY, barX, barY + barH);
+    glossGrad.addColorStop(0, "rgba(255,255,255,.5)");
+    glossGrad.addColorStop(0.5, "rgba(255,255,255,.08)");
+    glossGrad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = glossGrad;
+    ctx.fillRect(barX, barY, fillW, barH);
+    // 从后向前扫过的高光波:一条柔和光带在已完成区间内循环平移,不做百分比跳变,是纯装饰性的"正在进行"提示
+    if (!done) {
+      const waveW = 46, wavePeriod = 1.15;
+      const waveX = barX - waveW + ((splash.t % wavePeriod) / wavePeriod) * (fillW + waveW);
+      const waveGrad = ctx.createLinearGradient(waveX, 0, waveX + waveW, 0);
+      waveGrad.addColorStop(0, "rgba(255,255,255,0)");
+      waveGrad.addColorStop(0.5, "rgba(255,255,255,.6)");
+      waveGrad.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = waveGrad;
+      ctx.fillRect(waveX, barY, waveW, barH);
+    }
+    ctx.restore();
+  }
+  // 描边:玻璃边缘一圈细高光,和容器的发光轮廓呼应
+  ctx.strokeStyle = "rgba(255,255,255,.4)"; ctx.lineWidth = 1;
+  UI.roundRect(ctx, barX + 0.5, barY + 0.5, barW - 1, barH - 1, (barH - 1) / 2); ctx.stroke();
+  ctx.restore();
+  // GG17/GG18:跳过提示挪到进度条正下方,并写明提前跳过的后果;延迟 0.9s 才淡入,不抢开场注意力
+  const hintAlpha = clamp((splash.t - 0.9) / 0.5, 0, 1) * (1 - exitK) * textAlpha;
   if (hintAlpha > 0.01) {
-    ctx.save(); ctx.globalAlpha = hintAlpha * 0.55;
-    ctx.textAlign = "center"; ctx.fillStyle = "#fff"; ctx.font = "12px 'Segoe UI', sans-serif";
-    ctx.fillText("点击跳过", cx, H * 0.92);
+    ctx.save(); ctx.textAlign = "center"; ctx.fillStyle = "#fff";
+    ctx.globalAlpha = hintAlpha * 0.6;
+    ctx.font = "13px 'Segoe UI', sans-serif";
+    ctx.fillText(done ? "点击立即进入" : "点击任意位置跳过", cx, barY + 34);
+    if (!done) {
+      ctx.globalAlpha = hintAlpha * 0.4;
+      ctx.font = "11px 'Segoe UI', sans-serif";
+      ctx.fillText("提前跳过后剩余贴图将在后台继续加载，", cx, barY + 56);
+      ctx.fillText("未就绪的画面会暂以简化图形显示，加载完成后自动恢复", cx, barY + 72);
+    }
     ctx.restore();
   }
 }
@@ -74,7 +160,12 @@ canvas.addEventListener("pointerdown", (e) => {
   if (!splash.exiting) { splash.exiting = true; splash.exitT = 0; }
   e.stopImmediatePropagation(); e.preventDefault();
 }, { capture: true });
-ImageAssets.loadTiered().then(() => { splash.ready = true; });   // 常用层素材加载完成信号,喂给上面的开屏页缓冲判断;长尾层继续在后台默默加载
+// GG20:热启动收短停留时长——常用层(首页/机型/HUD)在 500ms 内就落定,通常意味着贴图已经在浏览器缓存里,
+//   属于"回头玩家再次打开"而非首次冷启动,没必要还让他们多等 2.2s 的最短展示时间,缩到 1.0s 即可。
+const _splashLoadStart = performance.now();
+ImageAssets.loadAllTiered(() => {
+  if (performance.now() - _splashLoadStart < 500) splash.minHold = 1.0;
+}).then(() => { splash.ready = true; });
 Settings.load();                                   // 载入持久化设置(音量/音效/震动/上次难度)
 Progress.load();                                   // 载入关卡进度
 Achievements.load();                               // OO:载入成就进度
@@ -99,21 +190,9 @@ function loop(now) {
   updateSplash(dt); drawSplash(ctx);
   requestAnimationFrame(loop);
 }
-function drawBootLoading() {
-  const W = CONFIG.WIDTH, H = CONFIG.HEIGHT, cx = W / 2;
-  ctx.save();
-  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);   // GG13:改纯黑,和后面开屏页的黑底衔接,不会有一下蓝一下黑的跳色感
-  ctx.fillStyle = "rgba(255,255,255,.12)";
-  for (let i = 0; i < 18; i++) ctx.fillRect((i * 73) % W, (i * 137) % H, i % 3 === 0 ? 2 : 1, 14 + (i % 4) * 8);
-  ctx.textAlign = "center";
-  ctx.fillStyle = "#e7f5ff";
-  ctx.font = "bold 24px 'Segoe UI', sans-serif";
-  ctx.fillText("贴图载入中...", cx, H / 2);
-  ctx.fillStyle = "rgba(231,245,255,.68)";
-  ctx.font = "14px 'Segoe UI', sans-serif";
-  ctx.fillText("首次打开会稍慢，缺失素材仍会自动兜底", cx, H / 2 + 30);
-  ctx.restore();
-}
+// GG18:原来独立的"贴图载入中..."开机页和开屏鸣谢页合并成一页——主循环启动前直接画开屏页的第 0 帧
+//   (纯黑+漂浮光点,文字 alpha 还是 0),循环一启动文字自然渐入,中间没有任何页面切换或跳色。
+function drawBootLoading() { drawSplash(ctx); }
 function startLoop() {
   last = performance.now();
   requestAnimationFrame(loop);

@@ -30,6 +30,7 @@ const game = {
   _codexBossIdx: 0, _codexDragStartX: 0, _codexDragging: false, _codexTab: "boss",   // Z:首页图鉴(关卡预览+BOSS轮播)+ OO:成就/道具/强化标签
   _codexUpgradeScrollY: 0, _codexUpgradeDragStartY: 0, _codexUpgradeDragStartScroll: 0, _codexUpgradeDragging: false,   // OO:强化图鉴纵向滚动
   _tutorialPage: 0, _tutorialDragStartX: 0, _tutorialDragging: false,   // FF:新手引导翻页
+  _tutorialAnimT: 1, _tutorialAnimDir: 1,   // GG22:翻页时卡片横向滑入+淡入的过渡计时(1=动画已完成),Dir 记录来向(前进/后退)决定滑入方向
   // MM:地图纵向滚动(为世界数超过一屏做准备)+ 拖动/点击手势区分
   _mapScrollY: 0, _mapDragStartX: 0, _mapDragStartY: 0, _mapDragStartScrollY: 0, _mapDragging: false, _mapDragMoved: false,
   _mapScrollTarget: null,   // MM2:进图自动定位到最新解锁关卡时的缓动目标(update(dt) 里阻尼追上去,拖动时被打断置 null)
@@ -229,23 +230,25 @@ const game = {
   },
 
   // ── FF:新手引导(首次启动自动展示,首页"？帮助"可重看;左右滑动/箭头翻页,同一套交互模式)──
-  toTutorial() { this.state = "tutorial"; this._tutorialPage = 0; },
+  toTutorial() { this.state = "tutorial"; this._tutorialPage = 0; this._tutorialAnimT = 1; },
   closeTutorial() { Settings.set("seenTutorial", true); this.toTitle(); },
   tutorialSkipRect() { return { x: 20, y: 28, w: 100, h: 36 }; },
   tutorialArrowRect(dir) { const y = CONFIG.HEIGHT / 2 - 24; return dir < 0 ? { x: 26, y, w: 56, h: 48 } : { x: CONFIG.WIDTH - 82, y, w: 56, h: 48 }; },
   tutorialNextRect() { return { x: CONFIG.WIDTH / 2 - 130, y: CONFIG.HEIGHT - 100, w: 260, h: 54 }; },
+  // GG22:翻页统一走这一个入口——切换页码的同时把动画计时清零、记下前进/后退方向,drawTutorial 据此做 0.2s 的滑入+淡入
+  setTutorialPage(idx, dir) { this._tutorialPage = idx; this._tutorialAnimDir = dir; this._tutorialAnimT = 0; },
   tutorialPointerDown(px, py) {
     const inR = (r) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h, n = TUTORIAL_PAGES.length;
     if (inR(this.tutorialSkipRect())) { this.closeTutorial(); return; }
-    if (inR(this.tutorialArrowRect(-1))) { this._tutorialPage = (this._tutorialPage - 1 + n) % n; return; }
-    if (inR(this.tutorialArrowRect(1))) { this._tutorialPage = (this._tutorialPage + 1) % n; return; }
-    if (inR(this.tutorialNextRect())) { if (this._tutorialPage >= n - 1) this.closeTutorial(); else this._tutorialPage++; return; }
+    if (inR(this.tutorialArrowRect(-1))) { this.setTutorialPage((this._tutorialPage - 1 + n) % n, -1); return; }
+    if (inR(this.tutorialArrowRect(1))) { this.setTutorialPage((this._tutorialPage + 1) % n, 1); return; }
+    if (inR(this.tutorialNextRect())) { if (this._tutorialPage >= n - 1) this.closeTutorial(); else this.setTutorialPage(this._tutorialPage + 1, 1); return; }
     this._tutorialDragStartX = px; this._tutorialDragging = true;
   },
   tutorialSwipe(px) {
     const dx = px - this._tutorialDragStartX, n = TUTORIAL_PAGES.length;
-    if (dx < -40) this._tutorialPage = (this._tutorialPage + 1) % n;
-    else if (dx > 40) this._tutorialPage = (this._tutorialPage - 1 + n) % n;
+    if (dx < -40) this.setTutorialPage((this._tutorialPage + 1) % n, 1);
+    else if (dx > 40) this.setTutorialPage((this._tutorialPage - 1 + n) % n, -1);
   },
 
   pause()  { if (this.state === "playing") { this.state = "paused"; input.dragging = false; } },
@@ -2006,7 +2009,7 @@ const game = {
     Sound.shieldBreak(); Haptics.shieldBreak(); this.addShake(3, 0.1);
   },
   // MO:爆震波推进——半径匀速扩散,清掉扫过的所有敌弹,对每架敌机只结算一次伤害,到达最大半径后消亡
-  // MO11:healOnDeath 的波(护盾破碎波)额外记录清了多少发弹幕/消灭了多少敌机,波消亡时按"消除弹幕数+消灭敌人数"回血
+  // MO11:healOnDeath 的波(护盾破碎波)额外记录清了多少发弹幕/消灭了多少敌机,波消亡时按"(消除弹幕数+消灭敌人数)×5"回血
   updateMorphBlasts(dt) {
     const m = (this.player && this.player.ship.morph) || {};
     const speed = m.blastSpeed || 640;
@@ -2037,8 +2040,15 @@ const game = {
       if (w.r >= maxR) {
         w.dead = true;
         if (w.healOnDeath && this.player) {
-          const heal = w.clearedBullets + w.clearedEnemies;
-          if (heal > 0) { this.player.heal(heal); this.floats.push(new FloatText(w.x, w.y - 30, "相位回收 +" + heal, "#66d9e8")); }
+          // MO13:回血量从"清除数×1"上调为"清除数×5"——×1 在中后期弹幕密度下回血几乎无感,被动缺乏存在感
+          const heal = (w.clearedBullets + w.clearedEnemies) * 5;
+          // GG24:浮字附上"清N弹M敌"的来源明细,不然玩家只看到一个总数,感受不到 ×5 加成具体来自哪
+          if (heal > 0) {
+            this.player.heal(heal);
+            const detail = "(弹" + w.clearedBullets + "+敌" + w.clearedEnemies + ")×5";
+            this.floats.push(new FloatText(w.x, w.y - 30, "相位回收 +" + heal, "#66d9e8"));
+            this.floats.push(new FloatText(w.x, w.y - 12, detail, "#a5f3fc"));
+          }
         }
       }
     }
@@ -2245,6 +2255,7 @@ const game = {
       const cur = this._titleBtnScale[k] != null ? this._titleBtnScale[k] : 1;
       this._titleBtnScale[k] = cur + (target - cur) * Math.min(1, dt * 12);
     }
+    if (this._tutorialAnimT < 1) this._tutorialAnimT = Math.min(1, this._tutorialAnimT + dt / 0.2);   // GG22:翻页滑入动画,0.2s 线性推进
     if (this.state === "paused") return;          // 暂停:冻结一切(逻辑/粒子/计时器)
     if (this._cannonHitStopCd > 0) this._cannonHitStopCd -= dt;   // MO9:大炮命中反馈节流冷却
     if (this.flashTimer > 0) this.flashTimer -= dt;
@@ -3265,16 +3276,33 @@ const game = {
     UI.button(ctx, this.tutorialArrowRect(-1), { label: "‹", color: "#495057", font: 26, radius: 12 });
     UI.button(ctx, this.tutorialArrowRect(1), { label: "›", color: "#495057", font: 26, radius: 12 });
 
-    const cardW = 340, cardH = 340, cardX = cx - cardW / 2, cardY = 220;
+    // MO13:卡片高度改为按正文实际行数自适应——固定 340 高在行多的页(双形态机)会让文字戳穿底框。
+    //   先用正文字体量好每条要点折行后的子行数,算出所需高度再画卡片;条目之间留一点段间距,读起来不糊成一坨。
+    // GG23:曜迁双影/冥域魔瞳这两页机制比"拖动开火"复杂得多,光靠文字容易只记住字面、记不住手感——
+    //   在图标区叠一个小型循环演示动画(复用对局内真实的爆震波/隐身描边绘制函数,视觉和实际游戏严格一致)。
+    const demoKey = p.title.includes("曜迁") ? "morph" : p.title.includes("冥域") ? "scout" : null;
+    const cardW = 340, cardX = cx - cardW / 2, cardY = 200;
+    const bodyFont = "15px 'Segoe UI', sans-serif", lineH = 22, itemGap = 8;
+    ctx.font = bodyFont;
+    const wrapped = p.lines.map((line) => UI.wrapText(ctx, line, cardW - 40, 3));
+    const bodyH = wrapped.reduce((s, subs) => s + subs.length * lineH, 0) + (wrapped.length - 1) * itemGap;
+    const cardH = Math.max(320, 152 + bodyH + 6);   // 6 ≈ 让末行基线到底框保持约 28px 的呼吸边距
+
+    // GG22:翻页滑入——卡片整体沿来向方向轻微位移(40px→0)并淡入,和展柜/图鉴共用的 easeInOut 手感一致
+    const animK = easeInOut(clamp(this._tutorialAnimT, 0, 1));
+    ctx.save();
+    ctx.globalAlpha = animK;
+    ctx.translate((1 - animK) * 40 * this._tutorialAnimDir, 0);
+
     UI.panel(ctx, cardX, cardY, cardW, cardH, 20, { accent: "#4dabf7" });
-    ctx.font = "56px 'Segoe UI', sans-serif"; ctx.fillStyle = "#fff"; ctx.fillText(p.icon, cx, cardY + 74);
+    if (demoKey) this.drawTutorialDemo(ctx, demoKey, cx, cardY + 74);
+    else { ctx.font = "56px 'Segoe UI', sans-serif"; ctx.fillStyle = "#fff"; ctx.fillText(p.icon, cx, cardY + 74); }
     ctx.fillStyle = "#4dabf7"; ctx.font = "bold 22px 'Segoe UI', sans-serif"; ctx.fillText(p.title, cx, cardY + 118);
-    ctx.fillStyle = "#dee2e6"; ctx.font = "15px 'Segoe UI', sans-serif";
-    // BB:教程正文有几行较长(如机型技能说明),原来按固定行距整行绘制会撑出卡片边框;
-    //   改用 UI.wrapText 按卡片可用宽度逐字断行,再按实际子行数累加行距。
-    let lineY = cardY + 138;
-    p.lines.forEach((line) => {
-      UI.wrapText(ctx, line, cardW - 40, 3).forEach((sub) => { lineY += 22; ctx.fillText(sub, cx, lineY); });
+    ctx.fillStyle = "#dee2e6"; ctx.font = bodyFont;
+    let lineY = cardY + 152;
+    wrapped.forEach((subs) => {
+      subs.forEach((sub) => { ctx.fillText(sub, cx, lineY); lineY += lineH; });
+      lineY += itemGap;
     });
 
     for (let i = 0; i < n; i++) {
@@ -3282,8 +3310,29 @@ const game = {
       ctx.beginPath(); ctx.arc(dx, dy, i === this._tutorialPage ? 6 : 4.5, 0, Math.PI * 2);
       ctx.fillStyle = i === this._tutorialPage ? "#4dabf7" : "rgba(255,255,255,.3)"; ctx.fill();
     }
+    ctx.restore();
     UI.button(ctx, this.tutorialNextRect(), { label: last ? "开始游戏 START" : "下一步 NEXT", color: "#38d9a9", active: true, font: 20, radius: 14 });
     ctx.textAlign = "left";
+  },
+  // GG23:教程卡片图标区的实操演示——用 titleT 驱动一个 1.4s 循环的小动画,取代静态 emoji 图标
+  //   morph:复用 drawMorphBlastWave 画一圈从中心扩散又收拢的爆震波,直观对应"切换形态炸清场"这句话
+  //   scout:画一圈虚线描边 + 若隐若现的机身,呼应"隐身期间敌机锁不到你"这句话
+  drawTutorialDemo(ctx, key, cx, cy) {
+    const cyc = 1.4, k = (this.titleT % cyc) / cyc;
+    ctx.save();
+    if (key === "morph") {
+      const r = k * 46;
+      this.drawMorphBlastWave(ctx, cx, cy - 6, r, 46);
+      ctx.fillStyle = "#66d9e8"; ctx.font = "30px 'Segoe UI', sans-serif"; ctx.textAlign = "center";
+      ctx.globalAlpha = 0.9; ctx.fillText("⇋", cx, cy + 4);
+    } else if (key === "scout") {
+      const blink = 0.4 + Math.abs(Math.sin(this.titleT * 6)) * 0.5;
+      ctx.strokeStyle = "rgba(153,233,242,.8)"; ctx.lineWidth = 2; ctx.setLineDash([5, 5]);
+      ctx.beginPath(); ctx.arc(cx, cy - 6, 30, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.globalAlpha = blink; ctx.fillStyle = "#99e9f2"; ctx.font = "30px 'Segoe UI', sans-serif"; ctx.textAlign = "center";
+      ctx.fillText("🫥", cx, cy + 4);
+    }
+    ctx.restore();
   },
 
   // ── 关卡地图 ──

@@ -4,6 +4,8 @@
  * 3.5) 可选图片素材
  * ===================================================================== */
 const ImageAssets = {
+  // GG25:适龄提示图标——独立于 manifest 分类树,直接给一个固定路径常量,开屏页/鸣谢页右上角常驻展示
+  ageRatingSrc: "assets/images/ui/rating/icon-age-rating.png",
   manifest: {
     player: {
       balanced: "assets/images/ships/player-balanced.png",
@@ -167,18 +169,40 @@ const ImageAssets = {
     const srcs = this.dynamicSources().concat(this.sources(this.manifest.player), this.sources(this.manifest.wingman));
     const titleKeys = ["button-map", "button-challenge", "button-rival", "button-ship", "wordmark", "vignette", "logo-glow", "subtitle", "footer-glow"];
     for (const k of titleKeys) srcs.push("assets/images/ui/title/title-" + this.slug(k) + ".png");
+    srcs.push(this.ageRatingSrc);   // GG25:适龄提示图标——常用层,和其余首屏必需素材一起统计进加载进度
     return Array.from(new Set(srcs)).filter(Boolean);
   },
   longTailSources() {
     const common = new Set(this.commonSources());
     return this.allSources().filter(src => !common.has(src));
   },
-  // 先等"常用层"加载完(开屏页缓冲期正好覆盖这段等待),再悄悄把"长尾层"丢到后台继续加载,不阻塞任何人
-  loadTiered() {
-    return this.preloadSources(this.commonSources()).then(ok => {
-      this.preloadSources(this.longTailSources());
-      return ok;
-    });
+  // GG18:开屏页改为"全部贴图加载完才自动进入",需要真实的加载进度供进度条展示——
+  //   loadProgress 记录 已完成/总数,每张图 decode 落定(成功或走完重试彻底失败)都记一次 done;
+  //   加载顺序仍保持分层:先常用层(首页/机型/HUD)后长尾层(BOSS/敌机/后期背景),返回的 Promise 在"全部"落定后才 resolve。
+  // GG19:按张数计的进度是假的——世界背景单张 1~4MB,图标类单张几十 KB,10 张背景加载完可能才占"张数"的 6%,
+  //   但实际下载量已经占了大头,导致进度条前段几乎不动、快到 90% 时突然卡很久。改成按体积量级加权:
+  //   背景(最重)>BOSS/机型立绘>敌机>UI图标(最轻),用路径关键词粗分权重,不追求精确字节数,只求进度条观感线性。
+  progressWeight(src) {
+    if (/\/backgrounds\//.test(src)) return 10;
+    if (/\/bosses\//.test(src)) return 3;
+    if (/\/ships\/|\/enemies\//.test(src)) return 2;
+    return 1;
+  },
+  loadProgress: { done: 0, total: 0 },
+  _trackList(list) {
+    return Promise.all(list.map(src => {
+      const w = this.progressWeight(src);
+      return this.decode(this.ensure(src)).then(ok => { this.loadProgress.done += w; return ok; });
+    }));
+  },
+  // GG20:onCommonDone 回调——常用层落地的耗时是判断"这台设备/这次网络是热启动还是冷启动"的信号,
+  //   喂给 main.js 的开屏页去动态收短 minHold(见 splash.minHold 的热启动分支),不改变这里本身的加载行为。
+  loadAllTiered(onCommonDone) {
+    const common = this.commonSources(), tail = this.longTailSources();
+    this.loadProgress.done = 0;
+    this.loadProgress.total = common.concat(tail).reduce((s, src) => s + this.progressWeight(src), 0);
+    return this._trackList(common).then((r) => { if (onCommonDone) onCommonDone(); return r; })
+      .then(() => this._trackList(tail)).then(() => true, () => true);
   },
   // GG14:静默重试——弱网/瞬时抖动导致的单张贴图加载失败,不该让这张图永久兜底成矢量图形。
   //   失败后间隔 retryDelay 重新赋值 img.src(强制浏览器重新发起请求)再试,最多 maxRetries 次,
@@ -234,6 +258,7 @@ const ImageAssets = {
       "assets/images/ui/icons/icon-power-upgrade.png",
       "assets/images/ui/powerups/icon-powerup-power.png",
       "assets/images/ui/powerups/icon-powerup-heal.png",
+      this.ageRatingSrc,   // GG25:开屏页第一帧就要用,必须进关键层,不能等常用/长尾分层轮到它
     ];
   },
   loadCritical(opts = {}) {
