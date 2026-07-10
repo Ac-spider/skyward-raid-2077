@@ -14,6 +14,10 @@ const game = {
   dlgName: "", dlgText: "", dlgTimer: 0,   // P:BOSS 台词
   topScores: [], _recorded: false,
   farming: false, _reached: false, _farmTimer: 0, _farmWaveN: 0, _clearScore: 0, settleResult: null, _resetArmed: false, _settingsReturnState: "title",
+  // RV2:复活——进关卡/无尽新局时按当前难度的 reviveCount 重置次数(简单2/普通1/困难0),每死一次消耗一次,
+  //   死亡时若还有余量则弹出复活确认(state="revive"),用完(=0)后走原来的三路结算分支
+  _reviveCount: 0, _reviveUsedThisRun: false,
+  _gearDrop: null, _gearDropPopupOpen: false,   // RG3:结算掉落的机装+是否正显示专属弹窗(不停在关卡自动进的场景走横幅,不开这个弹窗)
   _itemSpawnTimer: 0,   // Q:常规关卡(非无尽)每隔 CONFIG.powerup.autoInterval 秒自动刷新一个道具
   _overflowBatch: {},
   _bombsUsedThisLevel: 0,   // OO:本关用了几个炸弹(给"轻装上阵"成就用)
@@ -94,7 +98,7 @@ const game = {
         enemyHpMult: 1, bossHpMult: 1, enemySpeedMult: 1,
         enemyHpBoostMult: null, enemyHpDoubleInterval: null,
         dmgRampMult: null, dmgDoubleInterval: null,
-        scoreMult: 1, fireMult: 1, dmgMult: 1, invuln: 1.2, startBombs: 3,
+        scoreMult: 1, fireMult: 1, dmgMult: 1, invuln: 1.2, startBombs: 3, reviveCount: 1,
       };
     }
     return CONFIG.endlessDifficulties[this._endlessDiffKey] || CONFIG.endlessDifficulties.normal;
@@ -112,8 +116,53 @@ const game = {
     const order = this.shipSelectOrder(), i = order.indexOf(this.ship.key);
     this._shipIdx = i >= 0 ? i : 0; this._shipScroll = this._shipIdx; this._shipScrollTarget = this._shipIdx;
     this._shipDragging = false; this._shipDragMoved = false; this._shipSnapping = false;
+    this._shipViewMode = "info"; this._equipPickerSlot = null;   // RG2:每次进机型选择页都回到"详情"视图,不记上次切到装备页
   },
   shipSelectBackRect() { return { x: 20, y: 28, w: 90, h: 36 }; },
+  // RG2:详情/装备 二选一切换——放在返回按钮同一行的最右侧,和图鉴标签同一套 UI.button 视觉。
+  //   横向标题贴图(drawSectionTitle "ship", maxW 210 居中于 cx)实测渲染宽度也就 210,右边缘落在 x=375,
+  //   这两个按钮必须整体挪到 x>375 之后,否则会被标题图压住(实测验证过,见 shot-shipequip-diagram.png 的教训)
+  shipViewToggleRect(mode) { return mode === "info" ? { x: CONFIG.WIDTH - 160, y: 28, w: 70, h: 36 } : { x: CONFIG.WIDTH - 80, y: 28, w: 70, h: 36 }; },
+  // RG4:去掉机身引出的连接线(太呆板)后改成内外双圈错开——8个方位角固定不变(45°等分),但按下标奇偶分到
+  //   内圈/外圈两个不同半径:偶数下标(正上/右/下/左四个基本方位)落内圈更靠近机身,奇数下标(四个斜角)落外圈,
+  //   两圈天然交错、互不遮挡,不需要额外算避让,比原来单圈+引出线更有层次感也更活泼。
+  equipSlotAnchor() { const info = this.shipInfoPanelRect(); return { cx: CONFIG.WIDTH / 2, cy: info.y + info.h / 2 + 6, inner: { rx: 98, ry: 82 }, outer: { rx: 188, ry: 156 } }; },
+  equipSlotNodePos(i) {
+    const a = this.equipSlotAnchor(), angle = -Math.PI / 2 + i * (Math.PI * 2 / CONFIG.gearSlots.length), ring = i % 2 === 0 ? a.inner : a.outer;
+    return { x: a.cx + Math.cos(angle) * ring.rx, y: a.cy + Math.sin(angle) * ring.ry, angle, cx: a.cx, cy: a.cy, inner: i % 2 === 0 };
+  },
+  equipSlotHit(px, py) {
+    for (let i = 0; i < CONFIG.gearSlots.length; i++) { const p = this.equipSlotNodePos(i); if (Math.hypot(px - p.x, py - p.y) <= 32) return i; }
+    return null;
+  },
+  gearOwnsAny(slotKey) { return CONFIG.gearTiers.some(t => this.gearOwns(this.gearItemKey(slotKey, t.key))); },
+  // RG2:点开的装备槽——从"该类型已拥有的档位"里选一个装备,外加一行"卸下装备"(只有当前有装备时才出现),点选项外的区域关闭不改动
+  equipPickerOptions(slotKey) {
+    if (!slotKey) return [];
+    const owned = CONFIG.gearTiers.filter(t => this.gearOwns(this.gearItemKey(slotKey, t.key))).map(t => this.gearItemKey(slotKey, t.key));
+    if (this.gearEquipped(slotKey)) owned.push(null);   // null = "卸下装备" 这一行
+    return owned;
+  },
+  equipPickerRect() {
+    const n = this.equipPickerOptions(this._equipPickerSlot).length, h = 70 + n * 46;
+    return { x: CONFIG.WIDTH / 2 - 140, y: CONFIG.HEIGHT / 2 - h / 2, w: 280, h };
+  },
+  equipPickerRowRect(i) { const r = this.equipPickerRect(); return { x: r.x + 14, y: r.y + 56 + i * 46, w: r.w - 28, h: 38 }; },
+  equipPickerPointerDown(px, py) {
+    const slotKey = this._equipPickerSlot, r = this.equipPickerRect();
+    const inR = (rr) => px >= rr.x && px <= rr.x + rr.w && py >= rr.y && py <= rr.y + rr.h;
+    if (!inR(r)) { this._equipPickerSlot = null; return; }   // 点弹窗外面 = 取消,不改动装备
+    const opts = this.equipPickerOptions(slotKey);
+    for (let i = 0; i < opts.length; i++) {
+      if (inR(this.equipPickerRowRect(i))) {
+        const loadout = Object.assign({}, Settings.data.gearLoadout);
+        loadout[slotKey] = opts[i];
+        Settings.set("gearLoadout", loadout);
+        this._equipPickerSlot = null;
+        return;
+      }
+    }
+  },
   // GG:所有区块的位置都从这两个矩形派生,保证"画出来的"和"点得到的"永远对得上,也不会再有下方按钮/提示语重叠的问题
   shipInfoPanelRect() { return { x: 30, y: 92, w: CONFIG.WIDTH - 60, h: 452 }; },
   shipCaseRect() { const p = this.shipInfoPanelRect(); return { x: p.x, y: p.y + p.h + 18, w: p.w, h: 210 }; },
@@ -150,6 +199,14 @@ const game = {
   shipSelectPointerDown(px, py) {
     const inR = (r) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
     if (inR(this.shipSelectBackRect())) { this.toTitle(); return; }
+    if (inR(this.shipViewToggleRect("info"))) { this._shipViewMode = "info"; this._equipPickerSlot = null; return; }
+    if (inR(this.shipViewToggleRect("gear"))) { this._shipViewMode = "gear"; this._equipPickerSlot = null; return; }
+    // RG2:装备视图下,点击优先交给装备槽/选择弹窗处理,不会漏到下面的箭头/展台判定里
+    if (this._shipViewMode === "gear") {
+      if (this._equipPickerSlot) { this.equipPickerPointerDown(px, py); return; }
+      const idx = this.equipSlotHit(px, py);
+      if (idx != null) { const slotKey = CONFIG.gearSlots[idx].key; if (this.gearOwnsAny(slotKey)) this._equipPickerSlot = slotKey; return; }
+    }
     if (inR(this.shipSelectArrowRect(-1))) { this.beginShipSnap(Math.round(this._shipScroll) - 1); return; }
     if (inR(this.shipSelectArrowRect(1))) { this.beginShipSnap(Math.round(this._shipScroll) + 1); return; }
     if (inR(this.shipSelectConfirmRect())) { this.setShip(this.shipSelectOrder()[this._shipIdx]); return; }
@@ -184,9 +241,10 @@ const game = {
   // ── Z:首页图鉴(关卡预览网格 + BOSS轮播 + OO:成就标签页,独立于机型选择页的拖拽状态)──
   toCodex() { this.state = "codex"; this._codexBossIdx = 0; this._codexTab = "boss"; },
   codexBackRect() { return { x: 20, y: 28, w: 90, h: 36 }; },
-  // OO:图鉴四个标签(BOSS/道具/强化/成就),固定顺序,标签名/配色见 drawCodex
-  codexTabKeys() { return ["boss", "item", "upgrade", "achievements"]; },
-  codexTabRect(i) { const w = 118, gap = 8, total = 4 * w + 3 * gap, x0 = (CONFIG.WIDTH - total) / 2; return { x: x0 + i * (w + gap), y: 70, w, h: 36 }; },
+  // OO:图鉴标签(BOSS/道具/强化/机装/成就),固定顺序,标签名/配色见 drawCodex
+  // RG:加入"机装"后从4个变5个,codexTabRect 改成按实际标签数动态算宽度(原来硬编码4个的总宽会在5个时超出画布)
+  codexTabKeys() { return ["boss", "item", "upgrade", "gear", "achievements"]; },
+  codexTabRect(i) { const n = this.codexTabKeys().length, gap = 6, w = Math.floor((CONFIG.WIDTH - 40 - (n - 1) * gap) / n), x0 = (CONFIG.WIDTH - (n * w + (n - 1) * gap)) / 2; return { x: x0 + i * (w + gap), y: 70, w, h: 36 }; },
   // OO:加了标签页之后网格/BOSS卡片整体下移,这里是唯一算 BOSS 卡片顶部 y 的地方,箭头/点击区/drawCodex 都从这取,不要各自硬编数字
   // WW:行数原来硬编码成3(对应12关/4列正好3行),第5世界加进来后关卡数变15,网格变成4行,
   //   硬编码3还按老高度算的话 BOSS 区域会往上盖住网格第4行——改成按 LEVELS.length 动态算行数。
@@ -196,6 +254,8 @@ const game = {
   codexArrowRect(dir) { const y = this.codexBossCardY() + 246 / 2 - 24; return dir < 0 ? { x: 26, y, w: 56, h: 48 } : { x: CONFIG.WIDTH - 82, y, w: 56, h: 48 }; },
   // MM:"出场关卡"这行文字的点击区域(点了跳到地图并高亮第一个出场关卡)
   codexAppearRect() { const cx = CONFIG.WIDTH / 2, cardW = 320; return { x: cx - cardW / 2 + 10, y: this.codexBossCardY() + 169, w: cardW - 20, h: 20 }; },
+  // RG:机装页 8 行固定列表(8槽位),不需要滚动——预留够的纵向空间,行间留 8px 间距,和强化图鉴的卡片行是同一套视觉(UI.panel)
+  gearRowRect(i) { const y0 = 134, rowH = 90, gap = 8; return { x: 20, y: y0 + i * (rowH + gap), w: CONFIG.WIDTH - 40, h: rowH }; },
   codexPointerDown(px, py) {
     const inR = (r) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
     if (inR(this.codexBackRect())) { this.toTitle(); return; }
@@ -203,6 +263,11 @@ const game = {
     for (let i = 0; i < tabs.length; i++) if (inR(this.codexTabRect(i))) { this._codexTab = tabs[i]; return; }
     if (this._codexTab === "upgrade") {   // OO:强化图鉴纵向拖动滚动,和地图节点区域同一套手感
       this._codexUpgradeDragStartY = py; this._codexUpgradeDragStartScroll = this._codexUpgradeScrollY; this._codexUpgradeDragging = true;
+      return;
+    }
+    // RG:机装页——点一行槽位,在"未装备→已拥有档位从低到高→未装备"之间循环(见 gearCycleSlot)
+    if (this._codexTab === "gear") {
+      for (let i = 0; i < CONFIG.gearSlots.length; i++) if (inR(this.gearRowRect(i))) { this.gearCycleSlot(CONFIG.gearSlots[i].key); return; }
       return;
     }
     if (this._codexTab !== "boss") return;   // OO:成就/道具页没有左右滑动/箭头这些交互
@@ -275,6 +340,7 @@ const game = {
     this.resetDepthSystems();
     this.flashTimer = 0; this._morphFlashTimer = 0; this.warningTimer = 0; this._recorded = false;
     this.farming = false; this._reached = false; this._farmTimer = 0; this._farmWaveN = 0; this.settleResult = null;
+    this._reviveCount = this.diff.reviveCount || 0; this._reviveUsedThisRun = false;
     this._itemSpawnTimer = this.itemAutoInterval(); this._overflowBatch = {}; this._hpTrailRatio = 1; this._bombsUsedThisLevel = 0;
     this._cannonCritsThisRun = 0; this._morphSwitchesThisRun = 0;
     director.begin(LEVELS[i].script);
@@ -301,6 +367,7 @@ const game = {
     if (!this.endlessLite) this.setEndlessDiff(opts.diff || Settings.data.endlessDiff || "normal");
     this.challengeSeed = opts.seed || Challenge.randomSeed(); this.challengeMode = !!opts.challenge; this.challengeDaily = !!opts.daily; this.challengeTarget = opts.target || null; this.challengeSplits = []; this.rivalInterference = (typeof RivalInterference !== "undefined") ? RivalInterference.create(this.challengeTarget) : null; this._rng = Challenge.rng(this.challengeSeed);
     this.farming = false; this._reached = false; this.currentLevel = 0; this.world = 1;
+    this._reviveCount = this.activeDiff.reviveCount || 0; this._reviveUsedThisRun = false;
     this._worldTransFrom = this.world; this._worldTransT = this.worldTransitionDur();
     this.state = "playing";
     this.player = new Player(); this.boss = null;
@@ -506,6 +573,33 @@ const game = {
     if (!this.endlessLite && proto >= 0 && this._endlessT >= 240 && this._endlessBossN % 3 === 2) return proto;
     const n = proto >= 0 ? CONFIG.bosses.length - 1 : CONFIG.bosses.length;
     return this._endlessBossN % n;
+  },
+  // RV:复活确认页的两个按钮 —— 布局参照 clearedMenuRect(通关后"结算/继续刷分"二选一)同一套居中堆叠模式,
+  //   避免另起一套坐标体系;两个 rect 之间、以及和上方文案之间都留了≥20px 间距,drawRevive 不会出现重叠。
+  reviveRect() { return { x: CONFIG.WIDTH / 2 - 150, y: 420, w: 300, h: 64 }; },
+  reviveDeclineRect() { return { x: CONFIG.WIDTH / 2 - 120, y: 530, w: 240, h: 50 }; },
+  reviveHit(px, py) { const r = this.reviveRect(); return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h; },
+  reviveDeclineHit(px, py) { const r = this.reviveDeclineRect(); return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h; },
+  // RV:确认复活——满血复活、给一段无敌缓冲、白送一次炸弹清屏(不消耗库存)、再把炸弹库存补到至少当前+2(封顶 maxBombs)
+  // RV2:_reviveShieldT 是纯视觉标记(不参与无敌判定,判定仍看 invulnTimer)——复活瞬间和 invulnTimer 同步设置,
+  //   entities.js 的 Player.draw 据此画一圈青色描边光环,让"我刚复活、还在无敌"这件事一眼可辨,而不是只能靠机身闪烁猜
+  doRevive() {
+    if (this.state !== "revive" || !this.player) return;
+    const p = this.player;
+    this.state = "playing";
+    p.hp = p.maxHp;
+    const invulnDur = CONFIG.player.bombInvuln + 1.2;
+    p.invulnTimer = Math.max(p.invulnTimer, invulnDur);
+    p._reviveShieldT = invulnDur;
+    this.bombClearEffect();
+    p.bombs = Math.min((p.bombs || 0) + 2, CONFIG.player.maxBombs);
+    this._reviveUsedThisRun = true;
+    Sound.revive(); Haptics.revive();
+    this.banner("复活!", "已恢复满血 · 炸弹 +2");
+  },
+  // RV:放弃复活——原来死亡时的三路分支(无尽/刷分/常规关卡)原样保留在这里
+  declineRevive() {
+    if (this.endless) this.settleEndless(); else if (this.farming) this.settle(); else this.state = "gameover";
   },
   settleEndless() {
     this.recordEndlessTelemetry();
@@ -765,9 +859,22 @@ const game = {
     this.topScores = Leaderboard.submit(this.levelDef().id, r.final);
     Achievements.checkLevelClear({ hpRatio: r.hpRatio, bombsUsed: this._bombsUsedThisLevel, maxCombo: this.maxCombo });   // OO
     this.farming = false;
-    // ②勾选自动进入下一关:同难度、同机型、新初始配置直接开下一关
-    if (advance && this.currentLevel < this.realLevelCount() - 1) this.startLevel(this.currentLevel + 1);
-    else this.state = "settle";
+    // RG:结算即按本关所在战区判定机装掉落——advance(自动进下一关)场景没有结算画面停留,改用横幅在下一关开场展示
+    this._gearDrop = null;
+    const dropKey = this.rollGearDrop(this.world);
+    if (dropKey) {
+      this._gearDrop = Object.assign({ key: dropKey, name: this.gearItemName(dropKey) }, this.gearAward(dropKey));
+    }
+    // ②勾选自动进入下一关:同难度、同机型、新初始配置直接开下一关(仍在游戏中,弹整页窗口太打断,用横幅代替)
+    // RG3:非自动进下一关(停在结算画面)时,掉落改成一个专门的弹出窗口展示——比结算页里一行小字更有"开箱"的仪式感
+    if (advance && this.currentLevel < this.realLevelCount() - 1) {
+      const drop = this._gearDrop;
+      this.startLevel(this.currentLevel + 1);
+      if (drop) this.banner("获得机装:" + drop.name, drop.autoEquipped ? "已自动装备" : "已存入图鉴 · 机装页可手动装备");
+    } else {
+      this.state = "settle";
+      this._gearDropPopupOpen = !!this._gearDrop;
+    }
   },
   spawnFarmWave() {
     this._farmWaveN++;
@@ -810,6 +917,125 @@ const game = {
   chipValue(key, prop, fallback) { const c = CONFIG.chips[key]; return this.chipActive(key) && c && c[prop] != null ? c[prop] : fallback; },
   bonusStacks(key) { return this.bonuses[key] || 0; },
   bonusValue(key, prop, fallback = 0) { const b = CONFIG.bonuses[key]; return b && b[prop] ? this.bonusStacks(key) * b[prop] : fallback; },
+  // RG:机装系统数值读取——不吃 bonus/chip 那套抽卡叠层逻辑,单纯"当前槽位装了哪件,查它固定的档位数值",
+  //   itemKey 格式固定为 "槽位key_档位key"(如 "wing_t2"),槽位没装备时直接给 fallback(通常是0,不加成也不减益)
+  gearItemKey(slotKey, tierKey) { return slotKey + "_" + tierKey; },
+  gearEquipped(slotKey) { return (Settings.data.gearLoadout || {})[slotKey] || null; },
+  gearTierOf(itemKey) { return itemKey ? itemKey.split("_")[1] : null; },
+  gearSlotOf(itemKey) { return itemKey ? itemKey.split("_")[0] : null; },
+  gearOwns(itemKey) { return !!itemKey && (Settings.data.gearOwned || []).includes(itemKey); },
+  gearValue(slotKey, fallback = 0) {
+    const itemKey = this.gearEquipped(slotKey);
+    if (!itemKey) return fallback;
+    const tier = this.gearTierOf(itemKey), v = CONFIG.gearValues[slotKey];
+    return v && v[tier] != null ? v[tier] : fallback;
+  },
+  gearSlotDef(slotKey) { return CONFIG.gearSlots.find(s => s.key === slotKey) || null; },
+  gearItemName(itemKey) {
+    if (!itemKey) return null;
+    const slot = this.gearSlotDef(this.gearSlotOf(itemKey)), tier = CONFIG.gearTiers.find(t => t.key === this.gearTierOf(itemKey));
+    return slot && tier ? tier.name + slot.name : itemKey;
+  },
+  // RG3:品阶视觉差异化——不只是描边变色,档位越高描边越粗、发光越强、外圈品阶点越多,魄能(t3)额外加一圈旋转的
+  //   放射短线(像传统 RPG"传说品质"道具的光效),制式(t1)完全朴素无特效,三档拉开明显的"一眼看出档次"的区分度。
+  gearTierFX(tierKey) { return { t1: { pips: 1, glow: 0, ring: 1.5, sparkle: false }, t2: { pips: 2, glow: 10, ring: 2.5, sparkle: false }, t3: { pips: 3, glow: 18, ring: 3.5, sparkle: true } }[tierKey] || { pips: 0, glow: 0, ring: 1.5, sparkle: false }; },
+  // RG4:魄能星芒——原来 8 根等长等宽、统一明暗的直线太机械("呆板"),改成经典四芒星:4 根长主脊(十字)+4 根短副脊
+  //   (斜角),每根脊都有独立的闪烁相位和长度起伏(不同步明暗/伸缩),根部到尖端用渐变收细收暗(不是硬边直线),
+  //   整体再叠一个很慢的旋转,读起来像"珠宝在发光"而不是"风扇叶片在转"。
+  drawGearSparkle(ctx, x, y, r, color) {
+    const t = this.titleT, rot = t * 0.18;
+    const spokes = [
+      { a: 0, len: 20, w: 2.6, ph: 0.0 }, { a: Math.PI / 2, len: 20, w: 2.6, ph: 1.7 },
+      { a: Math.PI, len: 20, w: 2.6, ph: 3.1 }, { a: -Math.PI / 2, len: 20, w: 2.6, ph: 4.4 },
+      { a: Math.PI / 4, len: 11, w: 1.4, ph: 2.3 }, { a: 3 * Math.PI / 4, len: 11, w: 1.4, ph: 0.6 },
+      { a: -Math.PI / 4, len: 11, w: 1.4, ph: 5.1 }, { a: -3 * Math.PI / 4, len: 11, w: 1.4, ph: 3.8 },
+    ];
+    ctx.save();
+    for (const s of spokes) {
+      const twinkle = 0.35 + Math.abs(Math.sin(t * 2.1 + s.ph)) * 0.65;
+      const stretch = 0.7 + Math.abs(Math.sin(t * 1.4 + s.ph * 1.3)) * 0.3;
+      const ang = s.a + rot, len = s.len * stretch;
+      const x0 = x + Math.cos(ang) * (r + 2), y0 = y + Math.sin(ang) * (r + 2);
+      const x1 = x + Math.cos(ang) * (r + 2 + len), y1 = y + Math.sin(ang) * (r + 2 + len);
+      const g = ctx.createLinearGradient(x0, y0, x1, y1);
+      g.addColorStop(0, UI.rgba(color, twinkle * 0.85)); g.addColorStop(1, UI.rgba(color, 0));
+      ctx.strokeStyle = g; ctx.lineWidth = s.w; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    }
+    ctx.restore();
+  },
+  // 圆形槽位徽章通用绘制——ship-equip放射图/掉落弹窗共用,owned=false 时叠一层锁定遮罩(codex 列表因为是方形沿用自己的画法,不复用这个)
+  drawGearBadge(ctx, x, y, r, slot, tierKey, owned) {
+    const tierDef = tierKey ? CONFIG.gearTiers.find(t => t.key === tierKey) : null;
+    const fx = this.gearTierFX(tierKey);
+    const color = tierDef ? tierDef.color : slot.color;
+    if (tierKey === "t3") this.drawGearSparkle(ctx, x, y, r, color);   // 魄能:星芒光效在徽章底下先画,徽章盖在上面,呈现"光从后面透出来"的层次
+    ctx.save();
+    if (fx.glow) { ctx.shadowColor = color; ctx.shadowBlur = fx.glow; }
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = UI.rgba(slot.color, tierKey ? 0.24 : 0.08); ctx.fill();
+    ctx.lineWidth = tierKey ? fx.ring : 1.5; ctx.strokeStyle = tierDef ? color : UI.rgba(slot.color, owned ? 0.55 : 0.3); ctx.stroke();
+    ctx.restore();
+    const icon = ImageAssets.gear(slot.key);
+    ctx.save(); ctx.textAlign = "center";
+    if (icon) { ctx.beginPath(); ctx.arc(x, y, r - 4, 0, Math.PI * 2); ctx.clip(); ImageAssets.draw(ctx, icon, x, y, (r - 4) * 2); }
+    else { ctx.fillStyle = slot.color; ctx.font = "bold " + Math.round(r * 0.6) + "px 'Segoe UI', sans-serif"; ctx.fillText(String(slot.world), x, y + r * 0.2); }
+    ctx.restore();
+    if (owned === false) { ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,.55)"; ctx.fill(); ctx.fillStyle = "rgba(255,255,255,.55)"; ctx.font = Math.round(r * 0.5) + "px 'Segoe UI', sans-serif"; ctx.textAlign = "center"; ctx.fillText("🔒", x, y + r * 0.18); ctx.restore(); }
+    // 品阶点:徽章正下方一排小圆点,1/2/3 个点对应制式/精密/魄能,未装备(tierKey=null)不画
+    if (tierKey) {
+      ctx.save(); const pipY = y + r + 7, gap = Math.max(6, r * 0.28);
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(x + (i - 1) * gap, pipY, 2.4, 0, Math.PI * 2); ctx.fillStyle = i < fx.pips ? color : "rgba(255,255,255,.15)"; ctx.fill(); }
+      ctx.restore();
+    }
+  },
+  // RG:拾取/掉落装备——新档位比当前已装备的高(或槽位空着)就自动换上,不需要玩家每次都手动进图鉴装备;
+  //   已经拥有的重复掉落直接忽略(简化模型不做残片/分解经济,后续可以加)
+  gearAward(itemKey) {
+    const slotKey = this.gearSlotOf(itemKey), tier = this.gearTierOf(itemKey);
+    const owned = (Settings.data.gearOwned || []).slice();
+    const isNew = !owned.includes(itemKey);
+    if (isNew) owned.push(itemKey);
+    const rank = { t1: 1, t2: 2, t3: 3 };
+    const cur = this.gearEquipped(slotKey), curTier = this.gearTierOf(cur);
+    let autoEquipped = false;
+    if (!cur || rank[tier] > (rank[curTier] || 0)) {
+      const loadout = Object.assign({}, Settings.data.gearLoadout);
+      loadout[slotKey] = itemKey;
+      Settings.set("gearLoadout", loadout);
+      autoEquipped = true;
+    }
+    if (isNew) Settings.set("gearOwned", owned);
+    return { isNew, autoEquipped };
+  },
+  // RG:结算掉落判定——关卡所在战区(world)直接决定掉落哪个槽位(8战区对应8槽位),难度决定概率和档位权重
+  rollGearDrop(worldN) {
+    const slot = CONFIG.gearSlots[(worldN - 1 + CONFIG.gearSlots.length) % CONFIG.gearSlots.length];
+    const dropCfg = CONFIG.gearDrop[this.diff.key] || CONFIG.gearDrop.normal;
+    if (!slot || !dropCfg || Math.random() > dropCfg.chance) return null;
+    const weights = dropCfg.weights, total = (weights.t1 || 0) + (weights.t2 || 0) + (weights.t3 || 0);
+    if (total <= 0) return null;
+    const roll = Math.random() * total; let acc = 0, tier = "t1";
+    for (const t of ["t1", "t2", "t3"]) { acc += weights[t] || 0; if (roll <= acc) { tier = t; break; } }
+    return this.gearItemKey(slot.key, tier);
+  },
+  // RG2:新手礼包——每个用户首次启动免费拿一整套制式(t1)装备,8槽位全配好,不用先刷关卡才有得穿。只发一次(存档标记)。
+  grantStarterGear() {
+    if (Settings.data.gearStarterGranted) return;
+    for (const s of CONFIG.gearSlots) this.gearAward(this.gearItemKey(s.key, "t1"));
+    Settings.set("gearStarterGranted", true);
+  },
+  // RG:图鉴机装页——点一个槽位行,在"未装备→已拥有档位从低到高→未装备"之间循环,不需要额外的确认弹窗
+  gearCycleSlot(slotKey) {
+    const owned = ["t1", "t2", "t3"].filter(t => this.gearOwns(this.gearItemKey(slotKey, t)));
+    if (!owned.length) return;
+    const curTier = this.gearTierOf(this.gearEquipped(slotKey));
+    const idx = curTier ? owned.indexOf(curTier) : -1;
+    const next = idx + 1 < owned.length ? owned[idx + 1] : null;
+    const loadout = Object.assign({}, Settings.data.gearLoadout);
+    loadout[slotKey] = next ? this.gearItemKey(slotKey, next) : null;
+    Settings.set("gearLoadout", loadout);
+  },
   bonusHpGain(key) { return (this._bonusHpGain && this._bonusHpGain[key]) || 0; },
   adrenalineValue(prop) {
     const b = CONFIG.bonuses.adrenaline, p = this.player;
@@ -853,7 +1079,7 @@ const game = {
     return p && (p.shieldHp > 0 || p.morphShieldUp) ? this.bonusValue("shieldAmplifier", "damageMult") : 0;
   },
   playerDamage(d, target = null) {
-    let m = 1 + this.bonusValue("damage", "damageMult") + this.bonusValue("glassCannon", "damageMult") + this.vitalReactorDamageMult() + this.stableFireDamageMult() + this.perfectLineValue("damageMult") + this.shieldDamageMult() + this.adrenalineValue("damageMult");
+    let m = 1 + this.bonusValue("damage", "damageMult") + this.bonusValue("glassCannon", "damageMult") + this.vitalReactorDamageMult() + this.stableFireDamageMult() + this.perfectLineValue("damageMult") + this.shieldDamageMult() + this.adrenalineValue("damageMult") + this.gearValue("fireControl");   // RG:机装-火控矩阵
     if (target && target.elite) m += this.bonusValue("eliteHunter", "eliteDamageMult");
     if (target && target.isBoss) m += this.bonusValue("bossHunter", "bossDamageMult");
     if (target && target.isBoss && target._weakTimer > 0) m += (target._weakDamageMult || (target.affix && target.affix.weakDamageMult) || CONFIG.bossPhase.weakDamageMult || 0) + this.bonusValue("weakScanner", "weakDamageMult");
@@ -866,7 +1092,7 @@ const game = {
     return Math.max(0.45, 1 - this.bonusValue("fireRate", "cooldownMult") - this.bonusValue("overdrive", "cooldownMult") - this.perfectLineValue("cooldownMult") - this.adrenalineValue("cooldownMult")) * jam;
   },
   mainGunCooldownMult() { return this.weaponCooldownMult() * (1 + this.bonusValue("heavyRounds", "mainCooldownPenalty")); },
-  damageTakenMult() { return Math.max(0.55, 1 + this.bonusValue("glassCannon", "damageTakenMult") + this.bonusValue("overdrive", "damageTakenMult") - this.bonusValue("armorPlating", "damageReductionMult") - this.routeBonus("生存", 0.10)); },
+  damageTakenMult() { return Math.max(0.55, 1 + this.bonusValue("glassCannon", "damageTakenMult") + this.bonusValue("overdrive", "damageTakenMult") - this.bonusValue("armorPlating", "damageReductionMult") - this.routeBonus("生存", 0.10) - this.gearValue("armor")); },   // RG:机装-装甲层
   rangeMult() { return 1 + this.bonusValue("range", "rangeMult") + this.routeBonus("追踪", 0.10); },
   pickupRangeMult() { return this.rangeMult() * (1 + this.bonusValue("magnetCore", "magnetMult")); },
   endlessEnemyHpMult() {
@@ -1867,9 +2093,15 @@ const game = {
   bombButtonHit(x, y) { const b = this.bombBtn; return (x - b.x) ** 2 + (y - b.y) ** 2 <= b.r * b.r; },
   useBomb() {
     if (!this.player || this.player.bombs <= 0) return;
-    this.player.bombs--; this._bombsUsedThisLevel++; Sound.bomb(); Haptics.bomb(); this.addShake(6, 0.2); this.hitStop(0.04);
+    this.player.bombs--; this._bombsUsedThisLevel++;
     if (this._endlessStats) this._endlessStats.bombs++;
     this.dropThreat(CONFIG.threat.bombLoss);
+    this.bombClearEffect();
+  },
+  // RV:炸弹清屏效果拆成独立方法——useBomb() 正常消耗一枚库存调用它,doRevive() 复活时也调用同一个效果
+  //   但不经过 useBomb() 的库存扣减/次数统计,避免"复活白送的这一下"被误记成玩家手动用了一个炸弹
+  bombClearEffect() {
+    Sound.bomb(); Haptics.bomb(); this.addShake(6, 0.2); this.hitStop(0.04);
     this.flashTimer = CONFIG.bomb.flash;
     this.player.invulnTimer = Math.max(this.player.invulnTimer, CONFIG.player.bombInvuln);
     for (const b of this.enemyBullets) { this.burst(b.x, b.y, "#ff8787", 3, 120); b.dead = true; }
@@ -1927,7 +2159,7 @@ const game = {
   specialButtonHit(x, y) { const b = this.specialBtn; return (x - b.x) ** 2 + (y - b.y) ** 2 <= b.r * b.r; },
   useSpecial() {
     if (!this.player || this.player.energy < 100 || this.player.specialCooldown > 0) return;
-    this.player.energy = 0; this.player.specialCooldown = CONFIG.special.cooldown * (this.player.ship.specialCooldownMult || 1); Sound.bomb(); Haptics.bomb(); this.addShake(8, 0.25); this.hitStop(0.06);
+    this.player.energy = 0; this.player.specialCooldown = CONFIG.special.cooldown * (this.player.ship.specialCooldownMult || 1) * (1 - this.gearValue("special")); Sound.bomb(); Haptics.bomb(); this.addShake(8, 0.25); this.hitStop(0.06);   // RG:机装-异能模块
     this.flashTimer = 0.35;
     const type = this.player.ship.specialType || "nuke";
     if (type === "shield") this.useSpecialShield();
@@ -2082,7 +2314,7 @@ const game = {
     if (this.endless && !this.endlessLite) { if (e.isBoss) this.recordEndlessBossDeath(e); else this.recordEndlessEnemyLife(e); }
     let gained;
     if (byBomb) { gained = Math.round(e.score * CONFIG.scoring.bombKillMult); }              // 炸弹/必杀清兵:不涨连击、分数打折
-    else { this.combo++; this.comboTimer = CONFIG.combo.timeout * (this.player ? this.player.ship.comboTimeoutMult : 1); this.maxCombo = Math.max(this.maxCombo, this.combo); gained = Math.round(e.score * this.comboMult() * this.threatScoreMult()); this.addThreat(e.isBoss ? CONFIG.threat.bossKillGain : CONFIG.threat.killGain); }
+    else { this.combo++; this.comboTimer = CONFIG.combo.timeout * (this.player ? this.player.ship.comboTimeoutMult : 1) * (1 + this.gearValue("avionics")); this.maxCombo = Math.max(this.maxCombo, this.combo); gained = Math.round(e.score * this.comboMult() * this.threatScoreMult()); this.addThreat(e.isBoss ? CONFIG.threat.bossKillGain : CONFIG.threat.killGain); }   // RG:机装-航电阵列
     this.score += gained;
     if (this.player && !byBomb) {
       this._bonusKillN++;
@@ -2256,7 +2488,7 @@ const game = {
       this._titleBtnScale[k] = cur + (target - cur) * Math.min(1, dt * 12);
     }
     if (this._tutorialAnimT < 1) this._tutorialAnimT = Math.min(1, this._tutorialAnimT + dt / 0.2);   // GG22:翻页滑入动画,0.2s 线性推进
-    if (this.state === "paused") return;          // 暂停:冻结一切(逻辑/粒子/计时器)
+    if (this.state === "paused" || this.state === "revive") return;   // 暂停/复活确认:冻结一切(逻辑/粒子/计时器)
     if (this._cannonHitStopCd > 0) this._cannonHitStopCd -= dt;   // MO9:大炮命中反馈节流冷却
     if (this.flashTimer > 0) this.flashTimer -= dt;
     if (this._morphFlashTimer > 0) this._morphFlashTimer -= dt;
@@ -2322,7 +2554,9 @@ const game = {
     pruneDead(this.enemies, releaseDead.enemy);
     pruneDead(this.powerups);
     if (this.boss && this.boss.dead) this.boss = null;
-    if (this.player.hp <= 0) { if (this.endless) this.settleEndless(); else if (this.farming) this.settle(); else this.state = "gameover"; }   // 刷分中阵亡也进结算
+    // RV:阵亡时若本局还没用过复活机会,先弹出复活确认(冻结在 state="revive"),而不是直接结算/失败;
+    //   玩家选择后走 doRevive()/declineRevive(),declineRevive 里才是原来这行的三路分支
+    if (this.player.hp <= 0) { if (this._reviveCount > 0) { this._reviveCount--; this.state = "revive"; } else this.declineRevive(); }   // 刷分中阵亡也进结算
   },
 
   resolveCollisions() {
@@ -2455,7 +2689,7 @@ const game = {
     // N:屏幕震动(仅对局态;标题/地图/设置/机型选择/图鉴 sh=0 不会 save,故其提前 return 不失衡)
     // HH:paused 也要排除在外 —— 之前 _shakeT 在暂停时不递减(冻结),但这里没排除 paused,
     // 导致每帧仍用 Math.random() 重新算一次抖动偏移,暂停画面就变成没完没了的随机抖动。
-    const inGame = this.state !== "title" && this.state !== "endlessdiff" && this.state !== "settings" && this.state !== "map" && this.state !== "shipselect" && this.state !== "codex" && this.state !== "tutorial" && this.state !== "paused";
+    const inGame = this.state !== "title" && this.state !== "endlessdiff" && this.state !== "settings" && this.state !== "map" && this.state !== "shipselect" && this.state !== "codex" && this.state !== "tutorial" && this.state !== "paused" && this.state !== "revive";
     const sh = (this._shakeT > 0 && inGame) ? this._shake : 0;
     if (sh > 0) { ctx.save(); ctx.translate((Math.random() * 2 - 1) * sh, (Math.random() * 2 - 1) * sh); }
     this.drawWorldBackground(ctx); stars.draw(ctx);
@@ -2520,11 +2754,14 @@ const game = {
     if (this.warningTimer > 0 && this.state === "playing") this.drawWarning(ctx);
     if (this.state === "chipselect") this._drawFaded(ctx, () => this.drawChipSelect(ctx));
     if (this.state === "paused") this._drawFaded(ctx, () => this.drawPause(ctx));
+    if (this.state === "revive") this._drawFaded(ctx, () => this.drawRevive(ctx));
     if (this.state === "gameover") this._drawFaded(ctx, () => this.drawEndScreen(ctx, "战斗失败", "#ff6b6b"));
     if (this.state === "cleared") this._drawFaded(ctx, () => this.drawCleared(ctx));
     if (this.state === "settle") this._drawFaded(ctx, () => this.drawSettle(ctx));
     if (this.state === "endlessover") this._drawFaded(ctx, () => this.drawEndlessOver(ctx));
     if (sh > 0) ctx.restore();
+    // RG3:掉落弹窗盖在最上层(结算画面之上),不受上面 sh 屏幕震动的 save/restore 影响,画面本身也不会跟着抖
+    if (this._gearDropPopupOpen) this.drawGearDropPopup(ctx);
   },
 
   // GG:品质徽标宽度单独抽出来算,好让卡片顶部那行标签在排版时就知道要给徽标让出多少空间(见 drawChipSelect)
@@ -2673,11 +2910,15 @@ const game = {
     ctx.fillStyle = "#dee2e6"; ctx.font = "20px 'Segoe UI', sans-serif"; ctx.fillText("得分 " + this.easedCount(r.base) + "  × 难度 " + r.diffFactor.toFixed(1), cx, 336);
     ctx.fillStyle = "#fff"; ctx.font = "bold 30px 'Segoe UI', sans-serif"; ctx.fillText("最终得分  " + this.easedCount(r.final, 1.3), cx, 384);
     // MO5:曜迁双影专属战报——形态切换/会心暴击次数,让这台机型的专属玩法在结算时有回响
-    if (this.ship.specialType === "morph") { ctx.fillStyle = "#66d9e8"; ctx.font = "15px 'Segoe UI', sans-serif"; ctx.fillText("形态切换 " + (r.morphSwitches || 0) + " 次 · 会心暴击 " + (r.morphCrits || 0) + " 次", cx, 408); }
-    ctx.fillStyle = "#adb5bd"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("── 无尽关卡榜 ──", cx, 434);
+    // RV2:本局是否用过复活,和上面的曜迁战报共用同一条"可选附加行"级联,有几行就顺延几行,board 标题位置跟着算
+    let noteY = 408;
+    if (this.ship.specialType === "morph") { ctx.fillStyle = "#66d9e8"; ctx.font = "15px 'Segoe UI', sans-serif"; ctx.fillText("形态切换 " + (r.morphSwitches || 0) + " 次 · 会心暴击 " + (r.morphCrits || 0) + " 次", cx, noteY); noteY += 24; }
+    if (this._reviveUsedThisRun) { ctx.fillStyle = "#66d9e8"; ctx.font = "15px 'Segoe UI', sans-serif"; ctx.fillText("本局使用了复活", cx, noteY); noteY += 24; }
+    const boardY0 = noteY > 408 ? noteY + 10 : 434;
+    ctx.fillStyle = "#adb5bd"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("── 无尽关卡榜 ──", cx, boardY0);
     let hl = false;
-    top.forEach((e, i) => { const me = !hl && e.score === r.final; if (me) hl = true; ctx.fillStyle = me ? "#ffd43b" : "#dee2e6"; ctx.font = (me ? "bold " : "") + "17px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + ".   " + e.score + "   " + e.date + (me ? "  ◄" : ""), cx, 464 + i * 28); });
-    ctx.fillStyle = "#4a90d9"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("点击空白返回地图", cx, 464 + top.length * 28 + 30);
+    top.forEach((e, i) => { const me = !hl && e.score === r.final; if (me) hl = true; ctx.fillStyle = me ? "#ffd43b" : "#dee2e6"; ctx.font = (me ? "bold " : "") + "17px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + ".   " + e.score + "   " + e.date + (me ? "  ◄" : ""), cx, boardY0 + 30 + i * 28); });
+    ctx.fillStyle = "#4a90d9"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("点击空白返回地图", cx, boardY0 + 30 + top.length * 28 + 30);
     ctx.textAlign = "left";
   },
   // F:无尽结算界面(无尽挑战 · 含强化/事件/RIVAL挑战码复盘)
@@ -2750,6 +2991,8 @@ const game = {
     }
     const tele = r.telemetry || {};
     ctx.fillText(fitLine("战况 击杀 " + (tele.kills || 0) + " · 精英 " + (tele.eliteKills || 0) + " · Boss " + (tele.bossKills || 0) + " · 受击 " + (tele.hits || 0) + "(格挡 " + (tele.blocked || 0) + ") · 承伤 " + Math.round(tele.damageTaken || 0) + " · 空域 " + (tele.eventClears || 0) + "/" + (tele.cleanEvents || 0) + (tele.eventFails ? "/失败" + tele.eventFails : "") + " · 干扰 " + Math.round(tele.jammed || 0) + "s · 炸弹 " + (tele.bombs || 0) + " · 选择 " + (tele.picks || 0) + "/" + (tele.drafts || 0), 356), cx, infoY); infoY += 18;
+    // RV2:本局是否用过复活——插进同一套自增 infoY 的战报级联里,不会和下面的榜单/按钮位置打架
+    if (this._reviveUsedThisRun) { ctx.fillStyle = "#66d9e8"; ctx.fillText("本局使用了复活", cx, infoY); ctx.fillStyle = "#adb5bd"; infoY += 18; }
     // MO5:曜迁双影专属战报——形态切换/会心暴击次数,让这台机型的专属玩法在结算时有回响
     if (this.ship.specialType === "morph") { ctx.fillStyle = "#66d9e8"; ctx.fillText("曜迁战报 形态切换 " + (r.morphSwitches || 0) + " 次 · 会心暴击 " + (r.morphCrits || 0) + " 次", cx, infoY); ctx.fillStyle = "#adb5bd"; infoY += 18; }
     const timeline = (r.timeline || []).map(m => m.t + "s " + m.score + "分/" + m.kills + "杀/" + (m.elite || 0) + "精英/HP" + m.hp + "%" + (m.jam ? "/干扰" + m.jam + "s" : "")).join(" · ");
@@ -2949,10 +3192,15 @@ const game = {
     // GG9:标题贴图化——复用首页"机型选择 SHIP"同款 logo
     this.drawSectionTitle(ctx, "ship", cx, 50, { w: 210, h: 64, fallback: "选择机型", fallbackBaselineAdj: 16 });
     UI.button(ctx, this.shipSelectBackRect(), { label: "‹ 首页", color: "#adb5bd", font: 15, radius: 10 });
+    // RG2:详情/装备切换——所有飞机共用同一套机装,所以这个切换不跟着下方展台选的机型变,只影响介绍面板内容
+    UI.button(ctx, this.shipViewToggleRect("info"), { label: "详情", color: "#4dabf7", active: this._shipViewMode === "info", font: 14, radius: 10 });
+    UI.button(ctx, this.shipViewToggleRect("gear"), { label: "装备", color: "#ff922b", active: this._shipViewMode === "gear", font: 14, radius: 10 });
 
     // ── 介绍面板放上面:代号/角色标签/简介/性能条/被动/机型技能(机身模型挪到下方展示框,不占这里空间) ──
     const info = this.shipInfoPanelRect();
     UI.panel(ctx, info.x, info.y, info.w, info.h, 18, { accent: sp.color, lineWidth: 2.5 });
+    if (this._shipViewMode === "gear") { this.drawShipEquip(ctx, sp, key); }
+    else {
     ctx.fillStyle = sp.color; ctx.font = "bold 27px 'Segoe UI', sans-serif"; ctx.fillText(sp.name, cx, info.y + 36);
     // GG:新代号(穹界震吼等)是氛围向的机体昵称,原本的"平衡型/攻击型…"分类特点改画成名字下方的小徽章,一眼看出这是什么定位
     // MO2:双形态机额外挂一枚"试用款"徽章(展示页会自动来回切换形态,提示玩家这是在演示机型效果),和角色徽章并排居中
@@ -3049,6 +3297,7 @@ const game = {
     ctx.fillStyle = "#ffd43b"; ctx.font = "bold 15px 'Segoe UI', sans-serif"; ctx.fillText(sp.specialName || "—", skillTextX, skillBoxY + 18);
     ctx.fillStyle = "#dee2e6"; ctx.font = "12px 'Segoe UI', sans-serif";
     UI.wrapText(ctx, sp.specialDesc || "", skillTextW).forEach((line, i) => ctx.fillText(line, skillTextX, skillBoxY + 38 + i * 15));
+    }   // RG2:结束 _shipViewMode==="info" 分支
 
     // ── 下方:独立的玻璃展示框(和上面介绍面板同一视觉语言),框内是可丝滑拖动的弧形展台轮播 ──
     const box = this.shipCaseRect(), baseY = this.shipCarouselBaseY(), spacing = this.shipCarouselSpacing(), maxSlots = this.shipCarouselMaxSlots();
@@ -3130,6 +3379,49 @@ const game = {
     ctx.fillStyle = "#4a90d9"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText("左右滑动或点击两侧机型切换", cx, confirmRect.y + confirmRect.h + 28);
     ctx.textAlign = "left";
   },
+  // RG4:机型选择页的"装备"视图——机身居中,8个槽位分内外双圈错开排布(不再有机身引出的连接线,内外圈天然
+  //   交错开的布局本身就能看出"围着机身"的关系,不需要线条硬连);槽位下方标注类型名+当前装备档位;
+  //   所有机型共用同一套(和 drawShipSelect 里选中的机型无关,只是顺手拿来当展示模型)
+  drawShipEquip(ctx, sp, key) {
+    const info = this.shipInfoPanelRect(), cx = CONFIG.WIDTH / 2, a = this.equipSlotAnchor();
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#fff"; ctx.font = "bold 18px 'Segoe UI', sans-serif"; ctx.fillText("机装配置", cx, info.y + 30);
+    ctx.fillStyle = "#868e96"; ctx.font = "12px 'Segoe UI', sans-serif"; ctx.fillText("所有机型共用同一套装备 · 点击槽位切换", cx, info.y + 50);
+    this.drawShipPreview(ctx, a.cx, a.cy, sp);
+    CONFIG.gearSlots.forEach((slot, i) => {
+      const p = this.equipSlotNodePos(i);
+      const equippedKey = this.gearEquipped(slot.key), tier = this.gearTierOf(equippedKey);
+      const tierDef = tier ? CONFIG.gearTiers.find(t => t.key === tier) : null;
+      const owned = this.gearOwnsAny(slot.key), r = p.inner ? 23 : 27;   // 内圈稍小/外圈稍大,强化"两层"的层次感
+      this.drawGearBadge(ctx, p.x, p.y, r, slot, tier, owned);
+      // WW:标注统一放在槽位正下方(用户明确要求),槽位名 + 当前装备档位(或"未装备"/"未获得")——
+      //   品阶点占了 badge 下方一点空间,标签整体再往下让一点
+      const labelY = p.y + r + 22;
+      ctx.fillStyle = "#dee2e6"; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillText(slot.name, p.x, labelY);
+      ctx.fillStyle = tierDef ? tierDef.color : (owned ? "#495057" : "#343a40"); ctx.font = "10px 'Segoe UI', sans-serif";
+      ctx.fillText(tierDef ? tierDef.name : (owned ? "未装备" : "未获得"), p.x, labelY + 13);
+    });
+    ctx.textAlign = "left";
+    if (this._equipPickerSlot) this.drawEquipPicker(ctx);
+  },
+  // RG2:点开的选择弹窗——浮在整页最上层,列出该槽位已拥有的档位(从低到高)+ 有装备时额外一行"卸下装备"
+  drawEquipPicker(ctx) {
+    const slotKey = this._equipPickerSlot, slot = this.gearSlotDef(slotKey), r = this.equipPickerRect(), opts = this.equipPickerOptions(slotKey);
+    ctx.fillStyle = "rgba(0,0,0,.5)"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+    // GG:同 drawGearDropPopup 的修复——UI.panel 单独用只是半透明玻璃面板,先垫一层实色底防止装备放射图透出来跟文字糊在一起
+    UI.roundRect(ctx, r.x, r.y, r.w, r.h, 16); ctx.fillStyle = "rgba(8,12,20,.96)"; ctx.fill();
+    UI.panel(ctx, r.x, r.y, r.w, r.h, 16, { accent: slot.color });
+    ctx.textAlign = "center"; ctx.fillStyle = slot.color; ctx.font = "bold 16px 'Segoe UI', sans-serif"; ctx.fillText(slot.name, r.x + r.w / 2, r.y + 30);
+    const equippedKey = this.gearEquipped(slotKey);
+    opts.forEach((itemKey, i) => {
+      const row = this.equipPickerRowRect(i), isCur = itemKey === equippedKey;
+      const label = itemKey ? this.gearItemName(itemKey) : "卸下装备";
+      const color = itemKey ? (CONFIG.gearTiers.find(t => t.key === this.gearTierOf(itemKey)) || {}).color || slot.color : "#868e96";
+      UI.button(ctx, row, { label: (isCur ? "✓ " : "") + label, color, active: isCur, font: 14, radius: 10 });
+    });
+    ctx.fillStyle = "rgba(255,255,255,.4)"; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillText("点击弹窗外区域关闭", r.x + r.w / 2, r.y + r.h - 10);
+    ctx.textAlign = "left";
+  },
 
   // ── Z:首页图鉴 —— 上半关卡预览网格(纯展示)+ 下半 BOSS 轮播(左右滑动) ──
   drawCodex(ctx) {
@@ -3138,12 +3430,13 @@ const game = {
     ctx.textAlign = "center";
     ctx.fillStyle = "#fff"; ctx.font = "bold 26px 'Segoe UI', sans-serif"; ctx.fillText("图鉴", cx, 50);
     UI.button(ctx, this.codexBackRect(), { label: "‹ 首页", color: "#adb5bd", font: 15, radius: 10 });
-    // OO:图鉴四个标签 —— BOSS / 道具 / 强化 / 成就
-    const tabDefs = [["boss", "BOSS", "#4dabf7"], ["item", "道具", "#51cf66"], ["upgrade", "强化", "#cc5de8"], ["achievements", "成就", "#ffd43b"]];
-    tabDefs.forEach(([key, label, color], i) => UI.button(ctx, this.codexTabRect(i), { label, color, active: this._codexTab === key, font: 14, radius: 10 }));
+    // OO:图鉴标签 —— BOSS / 道具 / 强化 / 机装 / 成就
+    const tabDefs = [["boss", "BOSS", "#4dabf7"], ["item", "道具", "#51cf66"], ["upgrade", "强化", "#cc5de8"], ["gear", "机装", "#ff922b"], ["achievements", "成就", "#ffd43b"]];
+    tabDefs.forEach(([key, label, color], i) => UI.button(ctx, this.codexTabRect(i), { label, color, active: this._codexTab === key, font: 13, radius: 10 }));
     if (this._codexTab === "achievements") { this.drawAchievements(ctx); return; }
     if (this._codexTab === "item") { this.drawItemCodex(ctx); return; }
     if (this._codexTab === "upgrade") { this.drawUpgradeCodex(ctx); return; }
+    if (this._codexTab === "gear") { this.drawGearCodex(ctx); return; }
 
     // 关卡预览网格:4列 x 3行,共 12 关,纯展示(通关地图去实际进入关卡)
     ctx.textAlign = "left"; ctx.fillStyle = "#868e96"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText("关卡预览", 18, 128); ctx.textAlign = "center";
@@ -3218,6 +3511,64 @@ const game = {
 
   // ── OO:强化图鉴(图鉴第三个标签)——无限挑战/关卡内可抽取的强化词条(CONFIG.bonuses)全览,
   //   数量较多(40+条),纵向裁剪+拖动滚动,和地图节点区域(mapViewportRect 系列)同一套算法 ──
+  // RG:机装图鉴——8槽位固定列表,左侧用槽位主题色的圆角方块占位(数字=对应第几战区),贴图后续替换这一块;
+  //   右侧文字区显示槽位名+掉落来源+效果说明+当前装备+已拥有档位,点整行循环切换装备档位(见 codexPointerDown/gearCycleSlot)
+  // RG3:结算掉落的专属弹窗——比结算页里一行小字更有"开箱"仪式感:大徽章(带完整品阶特效)+ 名称/品阶/来源战区 + 装备状态。
+  //   点击任意位置关闭(见 input.js 最前置的拦截),关闭后结算页上仍有一行常驻小字可以回顾(drawSettle 里那行)。
+  drawGearDropPopup(ctx) {
+    const g = this._gearDrop; if (!g) return;
+    const cx = CONFIG.WIDTH / 2, cy = CONFIG.HEIGHT / 2;
+    const slot = this.gearSlotDef(this.gearSlotOf(g.key)), tierKey = this.gearTierOf(g.key);
+    const tierDef = CONFIG.gearTiers.find(t => t.key === tierKey);
+    ctx.fillStyle = "rgba(0,0,0,.74)"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+    const cardW = 320, cardH = 360, cardX = cx - cardW / 2, cardY = cy - cardH / 2;
+    // 品阶越高,卡片本身也叠一层更强的外发光,呼应徽章的发光强度,让"这次开出好东西了"从卡片轮廓就能感觉到
+    const fx = this.gearTierFX(tierKey);
+    if (fx.glow) { ctx.save(); ctx.shadowColor = tierDef.color; ctx.shadowBlur = fx.glow * 1.4; UI.roundRect(ctx, cardX, cardY, cardW, cardH, 22); ctx.fillStyle = UI.rgba(tierDef.color, .04); ctx.fill(); ctx.restore(); }
+    // GG:UI.panel 本身只叠半透明渐变(玻璃质感),背后结算页的文字会透出来糊成一片——先垫一层接近不透明的实色底,
+    // 再叠 UI.panel 做玻璃高光/描边,两层加起来才是"完全盖住底下内容"的真正弹窗,而不是一层半透明蒙版
+    UI.roundRect(ctx, cardX, cardY, cardW, cardH, 22); ctx.fillStyle = "rgba(8,12,20,.96)"; ctx.fill();
+    UI.panel(ctx, cardX, cardY, cardW, cardH, 22, { accent: tierDef.color, lineWidth: 2.5 });
+    ctx.textAlign = "center";
+    ctx.fillStyle = tierDef.color; ctx.font = "bold 14px 'Segoe UI', sans-serif";
+    ctx.fillText(g.isNew ? "◆ 获得新机装 ◆" : "◆ 机装掉落(重复)◆", cx, cardY + 32);
+    this.drawGearBadge(ctx, cx, cardY + 138, 58, slot, tierKey, true);
+    ctx.fillStyle = "#fff"; ctx.font = "bold 22px 'Segoe UI', sans-serif"; ctx.fillText(slot.name, cx, cardY + 224);
+    ctx.fillStyle = tierDef.color; ctx.font = "bold 16px 'Segoe UI', sans-serif"; ctx.fillText(tierDef.name + " 品阶", cx, cardY + 250);
+    ctx.fillStyle = "#adb5bd"; ctx.font = "13px 'Segoe UI', sans-serif";
+    ctx.fillText("第" + slot.world + "战区掉落 · " + slot.desc, cx, cardY + 274);
+    ctx.fillStyle = g.autoEquipped ? "#38d9a9" : "#868e96"; ctx.font = "bold 14px 'Segoe UI', sans-serif";
+    ctx.fillText(g.autoEquipped ? "已自动装备" : (g.isNew ? "已存入机装库 · 可在机型选择手动装备" : "重复获得(已拥有,未替换当前装备)"), cx, cardY + 302);
+    ctx.fillStyle = "rgba(255,255,255,.4)"; ctx.font = "12px 'Segoe UI', sans-serif"; ctx.fillText("点击任意位置关闭", cx, cardY + cardH - 18);
+    ctx.textAlign = "left";
+  },
+
+  drawGearCodex(ctx) {
+    ctx.textAlign = "left"; ctx.fillStyle = "#868e96"; ctx.font = "13px 'Segoe UI', sans-serif";
+    ctx.fillText("机装系统 · 8槽位对应8战区,关卡结算有几率掉落对应装备 · 点击整行切换已拥有档位", 18, 120);
+    CONFIG.gearSlots.forEach((slot, i) => {
+      const r = this.gearRowRect(i);
+      const equippedKey = this.gearEquipped(slot.key), equippedTier = this.gearTierOf(equippedKey);
+      const tierDef = equippedTier ? CONFIG.gearTiers.find(t => t.key === equippedTier) : null;
+      UI.panel(ctx, r.x, r.y, r.w, r.h, 12, { accent: slot.color });
+      // RG3:圆形徽章复用 drawGearBadge(和机型选择的装备图一致的品阶视觉:描边粗细/发光/魄能放射线/品阶点)——
+      //   徽章中心比行正中略偏上,给品阶点留出的行内空间不会挤到面板下边缘
+      const iconR = 28, iconCx = r.x + 12 + iconR, iconCy = r.y + 36;
+      this.drawGearBadge(ctx, iconCx, iconCy, iconR, slot, equippedTier, this.gearOwnsAny(slot.key));
+      const tx = r.x + iconR * 2 + 26;
+      ctx.fillStyle = "#fff"; ctx.font = "bold 16px 'Segoe UI', sans-serif";
+      ctx.fillText(slot.name + "  ·  第" + slot.world + "战区掉落", tx, r.y + 24);
+      ctx.fillStyle = "#adb5bd"; ctx.font = "12px 'Segoe UI', sans-serif";
+      ctx.fillText(slot.desc, tx, r.y + 42);
+      if (equippedKey) { ctx.fillStyle = tierDef.color; ctx.font = "bold 14px 'Segoe UI', sans-serif"; ctx.fillText("已装备:" + this.gearItemName(equippedKey), tx, r.y + 64); }
+      else { ctx.fillStyle = "#495057"; ctx.font = "13px 'Segoe UI', sans-serif"; ctx.fillText("未装备", tx, r.y + 64); }
+      const ownedTiers = CONFIG.gearTiers.filter(t => this.gearOwns(this.gearItemKey(slot.key, t.key)));
+      ctx.textAlign = "right"; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillStyle = "#868e96";
+      ctx.fillText(ownedTiers.length ? "已获得 " + ownedTiers.map(t => t.name).join("/") : "尚未获得", r.x + r.w - 14, r.y + r.h - 14);
+      ctx.textAlign = "left";
+    });
+  },
+
   drawUpgradeCodex(ctx) {
     const cx = CONFIG.WIDTH / 2, vp = this.codexUpgradeViewportRect(), scrollY = this._codexUpgradeScrollY;
     const rowH = this.codexUpgradeRowH(), gap = this.codexUpgradeGap(), x0 = 20, w = CONFIG.WIDTH - 40;
@@ -3635,11 +3986,24 @@ const game = {
     ctx.strokeStyle = "#495057"; ctx.beginPath(); ctx.moveTo(cx - 150, 414); ctx.lineTo(cx + 150, 414); ctx.stroke();
     ctx.fillStyle = "#fff"; ctx.font = "bold 30px 'Segoe UI', sans-serif"; ctx.fillText("最终得分  " + this.easedCount(r.final, 1.3), cx, 456);
     ctx.fillStyle = "#38d9a9"; ctx.font = "16px 'Segoe UI', sans-serif"; ctx.fillText("最高分 " + Progress.entry(L.id).best + "     最高连击 " + this.maxCombo, cx, 492);
+    // RG/RV2:机装掉落 + 是否用过复活——都是"可选附加行",按需顺延占位,下面排行榜整体跟着最终高度走,不会重叠
+    let boardY0 = 536, noteY = 516;
+    if (this._gearDrop) {
+      ctx.fillStyle = this._gearDrop.isNew ? "#66d9e8" : "#868e96";
+      ctx.font = "15px 'Segoe UI', sans-serif";
+      ctx.fillText("机装掉落:" + this._gearDrop.name + (this._gearDrop.autoEquipped ? "(已装备)" : "(已拥有)"), cx, noteY);
+      noteY += 24; boardY0 += 24;
+    }
+    if (this._reviveUsedThisRun) {
+      ctx.fillStyle = "#66d9e8"; ctx.font = "15px 'Segoe UI', sans-serif";
+      ctx.fillText("本局使用了复活", cx, noteY);
+      boardY0 += 24;
+    }
     // 排行榜
-    ctx.fillStyle = "#adb5bd"; ctx.font = "17px 'Segoe UI', sans-serif"; ctx.fillText("── 最高分榜 ──", cx, 536);
+    ctx.fillStyle = "#adb5bd"; ctx.font = "17px 'Segoe UI', sans-serif"; ctx.fillText("── 最高分榜 ──", cx, boardY0);
     let hl = false;
-    this.topScores.forEach((e, i) => { const me = !hl && e.score === r.final; if (me) hl = true; ctx.fillStyle = me ? "#ffd43b" : "#dee2e6"; ctx.font = (me ? "bold " : "") + "16px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + ".   " + e.score + "   " + e.date + (me ? "  ◄" : ""), cx, 564 + i * 26); });
-    ctx.fillStyle = "#4a90d9"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("点击返回地图", cx, 564 + this.topScores.length * 26 + 28);
+    this.topScores.forEach((e, i) => { const me = !hl && e.score === r.final; if (me) hl = true; ctx.fillStyle = me ? "#ffd43b" : "#dee2e6"; ctx.font = (me ? "bold " : "") + "16px 'Segoe UI', sans-serif"; ctx.fillText((i + 1) + ".   " + e.score + "   " + e.date + (me ? "  ◄" : ""), cx, boardY0 + 28 + i * 26); });
+    ctx.fillStyle = "#4a90d9"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("点击返回地图", cx, boardY0 + 28 + this.topScores.length * 26 + 28);
     ctx.textAlign = "left";
   },
 
@@ -4268,6 +4632,25 @@ const game = {
     }
   },
 
+  // RV:复活确认页——阵亡瞬间冻结画面(飞机/敌机/弹幕都还留在原地,呼应"座机被击落"的既视感),
+  //   叠一层比结算页更深的暗幕,文案+两个按钮,按钮样式复用 UI.button(和结算/通关页同一套视觉语言)。
+  drawRevive(ctx) {
+    const cx = CONFIG.WIDTH / 2;
+    ctx.fillStyle = "rgba(0,0,0,.8)"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#ff6b6b"; ctx.font = "bold 42px 'Segoe UI', sans-serif"; ctx.fillText("座机被击落", cx, 300);
+    // RV2:_reviveCount 在死亡判定那一刻已经先扣过——这里显示的是"复活后还剩几次",而不是"这是第几次"
+    ctx.fillStyle = "#adb5bd"; ctx.font = "16px 'Segoe UI', sans-serif";
+    ctx.fillText(this._reviveCount > 0 ? "复活后本局还剩 " + this._reviveCount + " 次复活机会" : "本局最后一次复活机会", cx, 332);
+    ctx.fillStyle = "#fff"; ctx.font = "20px 'Segoe UI', sans-serif"; ctx.fillText("本局得分 " + this.easedCount(this.score), cx, 366);
+    const rr = this.reviveRect();
+    UI.button(ctx, rr, { label: "复活 REVIVE", color: "#38d9a9", active: true, font: 22, radius: 14 });
+    ctx.fillStyle = "#868e96"; ctx.font = "13px 'Segoe UI', sans-serif";
+    ctx.fillText("复活后自动触发一次炸弹清屏 · 炸弹 +2", cx, rr.y + rr.h + 24);
+    UI.button(ctx, this.reviveDeclineRect(), { label: "放弃 GIVE UP", color: "#495057", font: 17, radius: 12 });
+    ctx.textAlign = "left";
+  },
+
   drawEndScreen(ctx, title, color) {
     const cx = CONFIG.WIDTH / 2;
     ctx.fillStyle = "rgba(0,0,0,.72)"; ctx.fillRect(0, 0, CONFIG.WIDTH, CONFIG.HEIGHT);
@@ -4276,14 +4659,17 @@ const game = {
     ctx.fillStyle = "#adb5bd"; ctx.font = "16px 'Segoe UI', sans-serif"; ctx.fillText("难度 " + this.diff.name, cx, 332);
     ctx.fillStyle = "#fff"; ctx.font = "22px 'Segoe UI', sans-serif"; ctx.fillText("本局得分 " + this.easedCount(this.score), cx, 366);
     ctx.fillStyle = "#ffd43b"; ctx.font = "16px 'Segoe UI', sans-serif"; ctx.fillText("最高连击 " + this.maxCombo, cx, 392);
-    ctx.fillStyle = "#adb5bd"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("── 最高分榜 ──", cx, 440);
+    // RV2:是否用过复活——占一行,排行榜标题跟着顺延,不重叠
+    let boardY0 = 440;
+    if (this._reviveUsedThisRun) { ctx.fillStyle = "#66d9e8"; ctx.font = "14px 'Segoe UI', sans-serif"; ctx.fillText("本局使用了复活", cx, 416); boardY0 += 22; }
+    ctx.fillStyle = "#adb5bd"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("── 最高分榜 ──", cx, boardY0);
     let highlighted = false;
     this.topScores.forEach((e, i) => {
       const isMe = !highlighted && e.score === this.score; if (isMe) highlighted = true;
       ctx.fillStyle = isMe ? "#ffd43b" : "#dee2e6"; ctx.font = (isMe ? "bold " : "") + "18px 'Segoe UI', sans-serif";
-      ctx.fillText((i + 1) + ".   " + e.score + "      " + e.date + (isMe ? "  ◄" : ""), cx, 472 + i * 30);
+      ctx.fillText((i + 1) + ".   " + e.score + "      " + e.date + (isMe ? "  ◄" : ""), cx, boardY0 + 32 + i * 30);
     });
-    ctx.fillStyle = "#4a90d9"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("点击返回地图", cx, 472 + this.topScores.length * 30 + 30);
+    ctx.fillStyle = "#4a90d9"; ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillText("点击返回地图", cx, boardY0 + 32 + this.topScores.length * 30 + 30);
     ctx.textAlign = "left";
   },
 };

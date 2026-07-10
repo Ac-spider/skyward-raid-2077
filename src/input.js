@@ -44,6 +44,8 @@ function toggleMute() {
 canvas.addEventListener("pointerdown", (e) => {
   Sound.resume(); Music.resume(true);
   const p = toLogic(e.clientX, e.clientY);
+  // RG3:机装掉落弹窗盖在最上层,拦在所有状态分支最前面——点哪都先关弹窗,不会误触到弹窗底下结算页的"点击返回地图"
+  if (game._gearDropPopupOpen) { game._gearDropPopupOpen = false; return; }
   if (game.state === "title") {
     if (game.titleSettingsHit(p.x, p.y)) { game._resetArmed = false; game._settingsReturnState = "title"; game.state = "settings"; return; }
     if (game.titleCodexHit(p.x, p.y)) { game.toCodex(); return; }
@@ -83,6 +85,12 @@ canvas.addEventListener("pointerdown", (e) => {
   if (game.state === "cleared") {
     if (game.clearedCheckHit(p.x, p.y)) { game.autoNext = !game.autoNext; Settings.set("autoNext", game.autoNext); return; }
     const i = game.clearedMenuHit(p.x, p.y); if (i === 0) game.settle(game.autoNext); else if (i === 1) game.startFarm(); return;
+  }
+  // RV:复活确认——只认两个按钮的点击,其余点击原地吞掉(不能让点击落空后被下面的"非 playing 态点哪都回地图"这条通用规则接住)
+  if (game.state === "revive") {
+    if (game.reviveHit(p.x, p.y)) game.doRevive();
+    else if (game.reviveDeclineHit(p.x, p.y)) game.declineRevive();
+    return;
   }
   // UU:BUG修复——按钮文案是"返回首页"但之前调的是 toMap()(尤其无尽模式下,无尽没有"当前关卡"概念,落到地图页很莫名其妙)
   if (game.state === "paused") {

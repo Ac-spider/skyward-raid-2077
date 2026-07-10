@@ -167,6 +167,8 @@ const ImageAssets = {
   //   这些要么出现得晚(BOSS/后期世界)要么本来就有矢量兜底(敌机),不值得让玩家多等,开屏页结束后继续在后台悄悄加载。
   commonSources() {
     const srcs = this.dynamicSources().concat(this.sources(this.manifest.player), this.sources(this.manifest.wingman));
+    // RG2:机装槽位图标——按用户要求排在飞机机身贴图之后加载(数组顺序即请求优先级,飞机模型看得见摸得着,机装要进机型选择页才用得到)
+    if (typeof CONFIG !== "undefined" && CONFIG.gearSlots) for (const s of CONFIG.gearSlots) srcs.push("assets/images/ui/gear/icon-gear-" + s.key + ".png");
     const titleKeys = ["button-map", "button-challenge", "button-rival", "button-ship", "wordmark", "vignette", "logo-glow", "subtitle", "footer-glow"];
     for (const k of titleKeys) srcs.push("assets/images/ui/title/title-" + this.slug(k) + ".png");
     srcs.push(this.ageRatingSrc);   // GG25:适龄提示图标——常用层,和其余首屏必需素材一起统计进加载进度
@@ -322,6 +324,8 @@ const ImageAssets = {
   uiPowerup(key) { return this.ready("assets/images/ui/powerups/icon-powerup-" + this.slug(key) + ".png"); },
   uiChip(key) { return this.ready("assets/images/ui/chips/icon-chip-" + this.slug(key) + ".png"); },
   uiBonus(key) { return this.ready("assets/images/ui/bonuses/icon-bonus-" + this.slug(key) + ".png"); },
+  // RG2:机装槽位图标——文件名直接用槽位 key(wing/engine/...),不走 slug(),槽位 key 本身已经是合法文件名字符
+  gear(slotKey) { return this.ready("assets/images/ui/gear/icon-gear-" + slotKey + ".png"); },
   uiEvent(key) { return this.ready("assets/images/ui/events/icon-event-" + this.slug(key) + ".png"); },
   draw(ctx, img, x, y, size, rotation = 0) {
     if (!img) return false;

@@ -9,7 +9,7 @@ class Player {
     const diff = game.activeEndlessDiff();
     this.ship = ship;
     this.x = c.startX; this.y = c.startY; this.radius = c.radius * (ship.radiusMult || 1);
-    this.maxHp = Math.round(c.maxHp * ship.hpMult * diff.playerHpMult); this.baseMaxHp = this.maxHp; this.hp = this.maxHp;
+    this.maxHp = Math.round(c.maxHp * ship.hpMult * diff.playerHpMult * (1 + game.gearValue("wing"))); this.baseMaxHp = this.maxHp; this.hp = this.maxHp;   // RG:机装-翼载强化
     this.fireInterval = c.fireInterval * ship.fireMult;
     this.power = 1 + diff.startPower; this.overcharge = 0; this.powerDamage = 0; this.wingDamage = 0;
     this.bombs = clamp(game.activeDiff.startBombs + ship.bombs, 0, CONFIG.player.maxBombs);
@@ -21,6 +21,7 @@ class Player {
     this.charge = 0; this.charging = false; this.chargeCooldown = 0;
     this.slowTimer = 0; this.slowMult = 1;
     this.invulnTimer = 0; this._flameTimer = 0;   // RR:引擎尾焰粒子发射计时
+    this._reviveShieldT = 0;   // RV2:复活后的纯视觉光环计时(不参与无敌判定,判定仍看 invulnTimer),game.doRevive() 里设置
     // X4:机型专属必杀状态——护盾(防御型)/隐身(侦查型)。攻击型必杀(全屏重伤)/平衡型必杀(冲击波)不需要常驻状态,现开现用。
     this.shieldHp = 0; this.shieldMax = 0; this.shieldTimer = 0; this.shieldHits = 0; this.stealthTimer = 0;
     this.cannonMode = false;   // MO:双形态机——false 普通形态 / true 大炮形态(useSpecialMorph 切换)
@@ -33,7 +34,7 @@ class Player {
     if (this.slowTimer > 0) { this.slowTimer -= dt; if (this.slowTimer <= 0) this.slowMult = 1; }
     const moveSlow = this.slowTimer > 0 ? this.slowMult : 1;
     // 机动性手感曲线:对 lerpMult 取平方放大差异——低于 1 的机型明显迟滞(0.85→0.72),高于 1 的明显跟手(1.5→2.25)
-    const agility = Math.pow(this.ship.lerpMult || 1, 2);
+    const agility = Math.pow(this.ship.lerpMult || 1, 2) * (1 + game.gearValue("engine"));   // RG:机装-引擎核心
     if (Settings.data.controlMode === "joystick") {   // KK:定速推杆,而非贴向触点位置
       const speed = Math.min(CONFIG.joystick.maxSpeed * agility, 900) * moveSlow;   // 封顶 900px/s,防止高机动机型贴边失控
       this.x += input.joyDX * speed * dt; this.y += input.joyDY * speed * dt;
@@ -45,6 +46,7 @@ class Player {
     this.x += pull.x * dt; this.y += pull.y * dt;
     this.x = clamp(this.x, this.radius, CONFIG.WIDTH - this.radius); this.y = clamp(this.y, this.radius, CONFIG.HEIGHT - this.radius);
     if (this.invulnTimer > 0) this.invulnTimer -= dt;
+    if (this._reviveShieldT > 0) this._reviveShieldT -= dt;
     if (this._morphTransT > 0) this._morphTransT -= dt;
     if (this._recoilT > 0) this._recoilT -= dt;   // MO6:大炮开火后坐力动画剩余时间(见 update() 里 spawnPlayerBullet("cannon") 那一支和 _drawBody 的位移计算)
     if (this.specialCooldown > 0) this.specialCooldown -= dt;
@@ -182,7 +184,7 @@ class Player {
   }
   addBomb()    { this.bombs = clamp(this.bombs + 1, 0, CONFIG.player.maxBombs); }
   addWing()    { if (this.wings < CONFIG.wingMax) this.wings++; else this.wingDamage += (CONFIG.overflow.wingDamageStep || 0.25) * this.overflowStepMult(); }
-  addEnergy(n) { this.energy = clamp(this.energy + n * (this.ship.energyMult || 1), 0, 100); }
+  addEnergy(n) { this.energy = clamp(this.energy + n * (this.ship.energyMult || 1) * (1 + game.gearValue("powerCore")), 0, 100); }   // RG:机装-动力核心
   heal(n)      { this.hp = clamp(this.hp + n, 0, this.maxHp); }
   applySlow(mult, dur) {
     this.slowMult = Math.min(this.slowTimer > 0 ? this.slowMult : 1, mult || 1);
@@ -284,6 +286,9 @@ class Player {
     ctx.restore();
   }
   draw(ctx) {
+    // RV2:复活护盾光环——独立于下面的受击闪烁逻辑先画,不会被"无敌期间机身每隔几帧闪一下消失"的效果连带闪没,
+    //   让"我刚刚复活、还在保护期"这件事任何一帧都看得见,不用靠猜闪烁节奏
+    if (this._reviveShieldT > 0) this._drawReviveShield(ctx);
     if (this.stealthTimer > 0) {   // X4:稳定半透明,而不是像普通受击无敌那样快速闪烁——两者要能一眼区分开
       // X8:隐身最后 1 秒机身透明度开始闪烁,提示"马上要现形了",别站在弹幕堆里等着暴毙
       const ending = this.stealthTimer < 1;
@@ -296,6 +301,16 @@ class Player {
     this._drawBody(ctx);
     if (this.shieldHp > 0) this._drawShield(ctx);
     if (this.morphShieldUp) this._drawMorphShieldReady(ctx);
+  }
+  // RV2:护盾光环——常亮描边圈 + 轻微呼吸感的透明度脉动,最后 1 秒(_reviveShieldT<1)线性淡出提示"保护即将结束"
+  _drawReviveShield(ctx) {
+    const fade = clamp(this._reviveShieldT, 0, 1);
+    const pulse = 0.75 + Math.abs(Math.sin(game.titleT * 10)) * 0.25;
+    ctx.save();
+    ctx.globalAlpha = 0.55 * fade * pulse;
+    ctx.strokeStyle = "#66d9e8"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.radius + 10, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
   }
 }
 // X:机型专属机身剪影(delta 平衡/twin 攻击/bulk 防御/dart 侦查),按 ship.radiusMult 整体缩放
@@ -467,7 +482,7 @@ class HomingShot {
   init(x, y, overcharge = 0) {
     const s = CONFIG.secondary;
     this.x = x; this.y = y; this.overcharge = overcharge; this.radius = s.homingRadius;
-    this.speed = s.homingSpeed + overcharge * 28; this.turn = s.homingTurn + overcharge * 0.55 + game.shipWeaponValue("homingTurnBonus", 0); this.damage = s.homingDamage + Math.floor(overcharge / 2) + game.chipValue("homingSwarm", "damageBonus", 0) + game.shipWeaponValue("homingDamageBonus", 0) + game.bonusValue("swarmCore", "homingDamage");
+    this.speed = s.homingSpeed + overcharge * 28; this.turn = s.homingTurn + overcharge * 0.55 + game.shipWeaponValue("homingTurnBonus", 0); this.damage = (s.homingDamage + Math.floor(overcharge / 2) + game.chipValue("homingSwarm", "damageBonus", 0) + game.shipWeaponValue("homingDamageBonus", 0) + game.bonusValue("swarmCore", "homingDamage")) * (1 + game.gearValue("hardpoint"));   // RG:机装-武装挂架
     this.targetRange = game.chipValue("homingSwarm", "targetRange", 300) * game.rangeMult() * (1 + game.bonusValue("swarmCore", "targetRangeMult"));
     this.vx = 0; this.vy = -this.speed; this.dead = false; this.life = 2.6;
   }
@@ -498,7 +513,7 @@ class Missile {
   init(x, y, overcharge = 0) {
     const s = CONFIG.secondary;
     this.x = x; this.y = y; this.overcharge = overcharge; this.radius = 8;
-    this.speed = s.missileSpeed + overcharge * 18; this.turn = s.missileTurn + overcharge * 0.25; this.damage = s.missileDamage + overcharge + game.chipValue("missileBarrage", "damageBonus", 0) + game.shipWeaponValue("missileDamageBonus", 0) + game.bonusValue("explosivePayload", "missileDamage") + game.routeBonus("导弹", 3);
+    this.speed = s.missileSpeed + overcharge * 18; this.turn = s.missileTurn + overcharge * 0.25; this.damage = (s.missileDamage + overcharge + game.chipValue("missileBarrage", "damageBonus", 0) + game.shipWeaponValue("missileDamageBonus", 0) + game.bonusValue("explosivePayload", "missileDamage") + game.routeBonus("导弹", 3)) * (1 + game.gearValue("hardpoint"));   // RG:机装-武装挂架
     this.splash = (s.missileSplash + overcharge * 5) * game.chipValue("missileBarrage", "splashMult", 1) * game.shipWeaponValue("missileSplashMult", 1) * (1 + game.bonusValue("explosivePayload", "splashMult") + game.routeBonus("导弹", 0.18)); this.vx = 0; this.vy = -this.speed; this.dead = false; this.life = 3.5 * game.rangeMult();
   }
   update(dt) {
@@ -530,7 +545,7 @@ class PlayerLaser {
   init(x, y, overcharge = 0, damageMult = 1, widthMult = 1) {
     const s = CONFIG.secondary;
     this.x = x; this.y = y; this.overcharge = overcharge; this.width = s.laserWidth + overcharge * 3;
-    this.damage = s.laserDamage + Math.floor(overcharge / 2) + ((game.player && game.player.powerDamage) || 0) + game.shipWeaponValue("laserDamageBonus", 0) + game.bonusValue("laserLens", "laserDamage") + game.laserDamageBonus(); this.life = (s.laserDuration + overcharge * 0.01 + game.bonusValue("laserLens", "laserDuration")) * game.rangeMult() * game.laserDurationMult();
+    this.damage = (s.laserDamage + Math.floor(overcharge / 2) + ((game.player && game.player.powerDamage) || 0) + game.shipWeaponValue("laserDamageBonus", 0) + game.bonusValue("laserLens", "laserDamage") + game.laserDamageBonus()) * (1 + game.gearValue("hardpoint")); this.life = (s.laserDuration + overcharge * 0.01 + game.bonusValue("laserLens", "laserDuration")) * game.rangeMult() * game.laserDurationMult();   // RG:机装-武装挂架
     this.width *= Math.max(0.52, 1 - game.bonusValue("laserLens", "laserWidthShrink"));
     if (game.chipActive("laserFocus")) {
       const c = CONFIG.chips.laserFocus;
@@ -540,13 +555,26 @@ class PlayerLaser {
     this.maxLife = this.life; this.dead = false; this.hitEnemies = new Set();
   }
   update(dt) { this.life -= dt; if (this.life <= 0) this.dead = true; }
+  // LZ:激光光柱改成单条连续渐变(中心亮白→蓝→透明),不再是"外层软渐变 + 内层硬边纯白矩形"叠两层——
+  //   之前那个纯白矩形边缘是硬直角,和外层柔光衔接得很生硬;现在从中心到两侧一路平滑过渡,读起来是一整根发光光柱
+  //   而不是"白框里塞了根白棍子"。同时叠一层更窄的核心高光,加强"能量在中心最烫"的层次感,而不是纯色块。
   draw(ctx) {
-    const a = clamp(this.life / this.maxLife, 0, 1), half = this.width / 2;
+    const a = clamp(this.life / this.maxLife, 0, 1), half = this.width / 2, outer = half * 2;
     ctx.save(); ctx.globalAlpha = a;
-    const glow = ctx.createLinearGradient(this.x - half * 2, 0, this.x + half * 2, 0);
-    glow.addColorStop(0, "rgba(77,171,247,0)"); glow.addColorStop(0.5, "rgba(116,192,252,.5)"); glow.addColorStop(1, "rgba(77,171,247,0)");
-    ctx.fillStyle = glow; ctx.fillRect(this.x - half * 2, 0, half * 4, this.y);
-    ctx.fillStyle = "#fff"; ctx.fillRect(this.x - Math.max(2, half * 0.22), 0, Math.max(4, half * 0.44), this.y);
+    const beam = ctx.createLinearGradient(this.x - outer, 0, this.x + outer, 0);
+    beam.addColorStop(0, "rgba(77,171,247,0)");
+    beam.addColorStop(0.32, "rgba(116,192,252,.55)");
+    beam.addColorStop(0.46, "rgba(210,235,255,.92)");
+    beam.addColorStop(0.5, "#fff");
+    beam.addColorStop(0.54, "rgba(210,235,255,.92)");
+    beam.addColorStop(0.68, "rgba(116,192,252,.55)");
+    beam.addColorStop(1, "rgba(77,171,247,0)");
+    ctx.fillStyle = beam; ctx.fillRect(this.x - outer, 0, outer * 2, this.y);
+    // 核心高光:更窄的一条纯白渐变叠在最中心,边缘也用渐变(而不是硬边矩形)柔和收边
+    const coreW = Math.max(3, half * 0.5);
+    const core = ctx.createLinearGradient(this.x - coreW, 0, this.x + coreW, 0);
+    core.addColorStop(0, "rgba(255,255,255,0)"); core.addColorStop(0.5, "rgba(255,255,255,.85)"); core.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = core; ctx.fillRect(this.x - coreW, 0, coreW * 2, this.y);
     ctx.restore();
   }
 }
