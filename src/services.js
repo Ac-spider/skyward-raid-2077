@@ -145,7 +145,8 @@ const SETTINGS_DEFAULTS = {
   seenTutorial: false, controlMode: "drag", mpSide: "right", mpTop: 8,
   gearStarterGranted: false,
   // RG12:经济系统——晶石(crystals)/体力(stamina,staminaUpdatedAt 是懒计算回复用的时间戳基准)
-  crystals: 0, stamina: 100, staminaUpdatedAt: 0,
+  // RG13:金币(gold)——第二种货币,这一版还没有获取途径,先建好字段,默认0
+  crystals: 0, stamina: 100, staminaUpdatedAt: 0, gold: 0,
 };
 const Settings = {
   key: "kzts_settings",
@@ -227,6 +228,7 @@ const Settings = {
       //   staminaUpdatedAt 不合法(非数字/未来时间戳)时归零,让 game.staminaCurrent() 按"从没记录过"重新起算,
       //   不会因为一个坏时间戳导致回复计算长期算错。
       crystals: Math.max(0, Math.round(number(src.crystals, 0, 0, 1e9))),
+      gold: Math.max(0, Math.round(number(src.gold, 0, 0, 1e9))),
       stamina: number(src.stamina, SETTINGS_DEFAULTS.stamina, 0, (CONFIG.economy && CONFIG.economy.staminaMax) || 100),
       staminaUpdatedAt: Number.isFinite(src.staminaUpdatedAt) && src.staminaUpdatedAt > 0 && src.staminaUpdatedAt <= Date.now() ? src.staminaUpdatedAt : 0,
       gearStones: {

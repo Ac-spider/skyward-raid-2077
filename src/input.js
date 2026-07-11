@@ -69,10 +69,14 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
   if (game.state === "title") {
-    if (game.titleSettingsHit(p.x, p.y)) { game._resetArmed = false; game._settingsReturnState = "title"; game.state = "settings"; return; }
-    if (game.titleCodexHit(p.x, p.y)) { game.toCodex(); return; }
-    if (game.titleHelpHit(p.x, p.y)) { game.toTutorial(); return; }
-    if (game.titleShopHit(p.x, p.y)) { game.toShop(); return; }
+    // RG13:折叠菜单——点 ☰ 切换展开/收起;展开时点其中一项才导航(顺带收起菜单);
+    //   展开态下点菜单面板范围之外的任意地方,就当作"点空白处收起菜单",不触发下面的大按钮
+    if (game.titleMenuToggleHit(p.x, p.y)) { game._titleMenuOpen = !game._titleMenuOpen; return; }
+    if (game.titleSettingsHit(p.x, p.y)) { game._titleMenuOpen = false; game._resetArmed = false; game._settingsReturnState = "title"; game.state = "settings"; return; }
+    if (game.titleCodexHit(p.x, p.y)) { game._titleMenuOpen = false; game.toCodex(); return; }
+    if (game.titleHelpHit(p.x, p.y)) { game._titleMenuOpen = false; game.toTutorial(); return; }
+    if (game.titleShopHit(p.x, p.y)) { game._titleMenuOpen = false; game.toShop(); return; }
+    if (game._titleMenuOpen) { game._titleMenuOpen = false; return; }
     // GG6:四个入口按钮改成"按下先按压反馈,松开时若手指/鼠标还在同一个按钮上才真正触发"——这样手机点击时
     //   能看到按下缩小的反馈,而不是 pointerdown 一到就立刻跳转、动画一帧都来不及播完
     const key = game.titleButtonKeyAt(p.x, p.y);

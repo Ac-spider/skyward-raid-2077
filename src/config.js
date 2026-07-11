@@ -496,24 +496,31 @@ const CONFIG = {
     { key: "ACE", min: 0.98, color: "#ffd43b" },
   ],
 
-  // RG12:经济系统(商店/体力/扫荡/词条刷新石)——首版数值,先用简单的整数方便后续按实际游玩节奏调整。
-  //   晶石(crystals)是唯一货币,关卡结算/扫荡都按 crystalsForLevel() 给,商店里用来买体力包和三种刷新石。
-  //   体力用真实时间回复(staminaUpdatedAt 记上次结算的时间戳,懒计算,不需要常驻计时器)。
+  // RG13:经济系统(商店/体力/扫荡/词条刷新石)——首版数值,先用简单的整数方便后续按实际游玩节奏调整。
+  //   晶石(crystals)是关卡结算/扫荡的常规货币;金币(gold)是第二种货币,这一版还没有获取途径(先建好数据/商店骨架)。
+  //   体力用真实时间回复(staminaUpdatedAt 记上次结算的时间戳,懒计算,不需要常驻计时器);
+  //   体力不足不再硬拦关卡入口——可以照常进,只是本关结算不发晶石/机装奖励(扫荡不涉及"进战斗",仍然硬拦)。
   economy: {
     crystalBase: 15, crystalPerWorld: 3, crystalBossMult: 1.5,
     staminaMax: 100, staminaRegenMinutes: 4, staminaCostLevel: 8, staminaCostSweep: 8,
   },
-  // RG12:商店货架——固定 4 件(体力包 + 三种刷新石),每次购买都是"+1件"(体力包例外,直接回体力值)。
-  shopItems: [
-    { key: "stamina30", kind: "stamina", amount: 30, price: 50, name: "体力补给包", desc: "立即恢复30点体力", color: "#38d9a9" },
-    { key: "rerollStone", kind: "stone", stoneKey: "reroll", price: 40, name: "刷新石", desc: "随机刷新所选装备的3条副属性数值(锁定的不受影响)", color: "#4dabf7" },
-    { key: "lockStone", kind: "stone", stoneKey: "lock", price: 30, name: "锁定石", desc: "锁定/解锁一条副属性,锁定后刷新石不会改动它", color: "#ffd43b" },
-    { key: "growthStone", kind: "stone", stoneKey: "growth", price: 60, name: "增长石", desc: "让所选装备的3条副属性数值全部提升一截", color: "#51cf66" },
-  ],
+  // RG13:商店按货币分两个货架——晶石商店3种刷新石,金币商店目前只有体力补给包(后续再慢慢上架)。
+  //   每件都标 currency 供 game.shopBuy() 判断扣哪种货币。
+  shopBatchSize: 5,   // "批量购买"一次最多买几件(实际会按余额封顶,买不够5件就买能买得起的数量)
+  shopItems: {
+    crystal: [
+      { key: "rerollStone", kind: "stone", stoneKey: "reroll", price: 40, currency: "crystals", name: "刷新石", desc: "随机刷新所选装备的3条副属性数值(锁定的不受影响)", color: "#4dabf7" },
+      { key: "lockStone", kind: "stone", stoneKey: "lock", price: 30, currency: "crystals", name: "锁定石", desc: "锁定/解锁一条副属性,锁定后刷新石不会改动它", color: "#ffd43b" },
+      { key: "growthStone", kind: "stone", stoneKey: "growth", price: 60, currency: "crystals", name: "增长石", desc: "让所选装备的3条副属性数值全部提升一截", color: "#51cf66" },
+    ],
+    gold: [
+      { key: "stamina30", kind: "stamina", amount: 30, price: 50, currency: "gold", name: "体力补给包", desc: "立即恢复30点体力", color: "#38d9a9" },
+    ],
+  },
   gearStoneDefs: {
-    reroll: { name: "刷新石", color: "#4dabf7" },
-    lock:   { name: "锁定石", color: "#ffd43b" },
-    growth: { name: "增长石", color: "#51cf66" },
+    reroll: { name: "刷新石", color: "#4dabf7", desc: "随机刷新这件装备所有未锁定副属性的数值(类型不变,数值在原区间内重新抽)" },
+    lock:   { name: "锁定石", color: "#ffd43b", desc: "选中后点任意一条副属性的锁形图标,切换它的锁定状态(锁定后刷新石不会碰它)" },
+    growth: { name: "增长石", color: "#51cf66", desc: "让这件装备所有副属性数值一律朝区间上限推进一截" },
   },
 
   // 难度档:dmgMult 敌方伤害倍率 / fireMult 敌方射击间隔倍率(>1 更慢=更易)
