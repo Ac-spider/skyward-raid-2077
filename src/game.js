@@ -118,7 +118,7 @@ const game = {
     const order = this.shipSelectOrder(), i = order.indexOf(this.ship.key);
     this._shipIdx = i >= 0 ? i : 0; this._shipScroll = this._shipIdx; this._shipScrollTarget = this._shipIdx;
     this._shipDragging = false; this._shipDragMoved = false; this._shipSnapping = false;
-    this._shipViewMode = "info"; this._equipPickerSlot = null; this._reforgeSelection = []; this._reforgeResult = null;   // RG2:每次进机型选择页都回到"详情"视图,不记上次切到装备页
+    this._shipViewMode = "info"; this._equipPickerSlot = null; this._reforgeSelection = []; this._reforgeResult = null; this._reforgePage = 0;   // RG2:每次进机型选择页都回到"详情"视图,不记上次切到装备页
   },
   shipSelectBackRect() { return { x: 20, y: 28, w: 90, h: 36 }; },
   // RG2:详情/装备 二选一切换——放在返回按钮同一行的最右侧,和图鉴标签同一套 UI.button 视觉。
@@ -277,7 +277,7 @@ const game = {
     // RG2:装备视图下,点击优先交给装备槽/选择弹窗/重铸入口处理,不会漏到下面的箭头/展台判定里
     if (this._shipViewMode === "gear") {
       if (this._equipPickerSlot) { this.equipPickerPointerDown(px, py); return; }
-      if (inR(this.shipReforgeEntryRect())) { this._shipViewMode = "reforge"; return; }
+      if (inR(this.shipReforgeEntryRect())) { this._shipViewMode = "reforge"; this._reforgePage = 0; return; }
       const idx = this.equipSlotHit(px, py);
       if (idx != null) { const slotKey = CONFIG.gearSlots[idx].key; if (this.gearOwnsAny(slotKey)) this.openEquipPicker(slotKey); return; }
     }
@@ -1295,14 +1295,25 @@ const game = {
   // RG7:重铸页面几何——不复用机型选择的展示框布局,单独一套(返回按钮同款位置/重选按钮对称放右上/网格居中/底部执行按钮)
   shipReforgeBackRect() { return { x: 20, y: 28, w: 90, h: 36 }; },
   shipReforgeResetRect() { return { x: CONFIG.WIDTH - 110, y: 28, w: 90, h: 36 }; },
-  // RG9:重铸候选池最多展示这么多件(4列×5行),仓库屯多了会提示"建议先合成消耗"而不是硬撑一个超长滚动列表
-  REFORGE_GRID_MAX: 20,
-  reforgeInventoryList() { return this.gearAllInventory().slice(0, this.REFORGE_GRID_MAX); },
+  // RG12:重铸候选池翻页——一页固定4列×5行=20件,仓库屯多了就翻页看,不再硬砍到只显示前20件。
+  //   选中记录的是实例 id(不是"第几页第几格"),翻页不会丢失已选中的件,哪怕跨页选3件也一样成立。
+  REFORGE_PAGE_SIZE: 20,
+  reforgeAllList() { return this.gearAllInventory(); },
+  reforgePageCount() { return Math.max(1, Math.ceil(this.reforgeAllList().length / this.REFORGE_PAGE_SIZE)); },
+  // 仓库数量变化(比如刚重铸完消耗了3件)可能让当前页超出新的总页数,这里统一夹一下,画/点都从这条过一遍
+  reforgeClampPage() { this._reforgePage = clamp(this._reforgePage || 0, 0, this.reforgePageCount() - 1); },
+  reforgeInventoryList() {
+    this.reforgeClampPage();
+    const size = this.REFORGE_PAGE_SIZE, page = this._reforgePage || 0;
+    return this.reforgeAllList().slice(page * size, page * size + size);
+  },
   reforgeCellRect(i) {
     const cols = 4, cellW = 108, cellH = 118, gap = 10, gridW = cols * cellW + (cols - 1) * gap;
     const col = i % cols, row = Math.floor(i / cols);
     return { x: (CONFIG.WIDTH - gridW) / 2 + col * (cellW + gap), y: 130 + row * (cellH + gap), w: cellW, h: cellH };
   },
+  reforgePrevPageRect() { return { x: CONFIG.WIDTH / 2 - 140, y: CONFIG.HEIGHT - 152, w: 50, h: 32 }; },
+  reforgeNextPageRect() { return { x: CONFIG.WIDTH / 2 + 90, y: CONFIG.HEIGHT - 152, w: 50, h: 32 }; },
   shipReforgeExecuteRect() { return { x: CONFIG.WIDTH / 2 - 110, y: CONFIG.HEIGHT - 90, w: 220, h: 56 }; },
   reforgePointerDown(px, py) {
     const inR = (r) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
@@ -1310,6 +1321,10 @@ const game = {
     if (inR(this.shipReforgeBackRect())) { this._shipViewMode = "gear"; this._reforgeSelection = []; return; }
     if (inR(this.shipReforgeResetRect())) { this._reforgeSelection = []; return; }
     if (inR(this.shipReforgeExecuteRect())) { if (this.reforgeCanExecute()) this.reforgeExecute(); return; }
+    if (this.reforgePageCount() > 1) {
+      if (inR(this.reforgePrevPageRect())) { this._reforgePage = Math.max(0, (this._reforgePage || 0) - 1); return; }
+      if (inR(this.reforgeNextPageRect())) { this._reforgePage = Math.min(this.reforgePageCount() - 1, (this._reforgePage || 0) + 1); return; }
+    }
     const list = this.reforgeInventoryList();
     for (let i = 0; i < list.length; i++) { if (inR(this.reforgeCellRect(i))) { this.reforgeTapCell(list[i].id); return; } }
   },
@@ -3829,6 +3844,16 @@ const game = {
         ctx.fillStyle = tierDef.color; ctx.font = "10px 'Segoe UI', sans-serif"; ctx.fillText(tierDef.name + " " + this.gearStatPct(inst.main), bx, r.y + 90);
         if (sel) { ctx.fillStyle = "#38d9a9"; ctx.font = "bold 11px 'Segoe UI', sans-serif"; ctx.fillText("已选中", bx, r.y + 106); }
       });
+    }
+
+    // RG12:翻页——仓库超过一页(20件)才显示上一页/下一页箭头 + "第 X/Y 页",不超一页时这行完全不占视觉噪音
+    const pageCount = this.reforgePageCount();
+    if (pageCount > 1) {
+      const page = this._reforgePage || 0;
+      UI.button(ctx, this.reforgePrevPageRect(), { label: "‹", color: "#495057", active: page > 0, font: 16, radius: 8 });
+      UI.button(ctx, this.reforgeNextPageRect(), { label: "›", color: "#495057", active: page < pageCount - 1, font: 16, radius: 8 });
+      ctx.fillStyle = "#868e96"; ctx.font = "12px 'Segoe UI', sans-serif";
+      ctx.fillText("第 " + (page + 1) + " / " + pageCount + " 页", cx, CONFIG.HEIGHT - 130);
     }
 
     const total = this.reforgeSelectedTotal(), canGo = this.reforgeCanExecute();
