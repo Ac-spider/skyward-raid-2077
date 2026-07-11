@@ -454,10 +454,12 @@ const CONFIG = {
     { key: "hardpoint",   name: "武装挂架", world: 7, color: "#ff922b", stat: "secondaryDamageMult",  desc: "提升导弹/追踪弹/镭射伤害" },
     { key: "special",     name: "异能模块", world: 8, color: "#66d9e8", stat: "specialCooldownMult",  desc: "缩短机型技能冷却" },
   ],
+  // RG6:砍掉制式(t1)档——两档更清爽,新手也不会拿到一堆食之无味的最低档装备;精良(原精密)成为新的入门档,
+  //   魂魄(原魄能)是顶档,只从 BOSS 关卡掉落。key 沿用 t2/t3 不变,老存档里万一有 t1 遗留物品仍能正常显示/生效
+  //   (gearValues 保留 t1 数值兜底),只是再也不会新掉落出来。
   gearTiers: [
-    { key: "t1", name: "制式", color: "#adb5bd" },
-    { key: "t2", name: "精密", color: "#4dabf7" },
-    { key: "t3", name: "魄能", color: "#ffd43b" },
+    { key: "t2", name: "精良", color: "#4dabf7" },
+    { key: "t3", name: "魂能", color: "#ffd43b" },
   ],
   // 每档数值:除 special 外都是"加成幅度"(该槽位效果在 gearValue 用法处自行决定加/减/乘);special 是冷却缩短比例
   gearValues: {
@@ -470,12 +472,29 @@ const CONFIG = {
     hardpoint:   { t1: 0.08, t2: 0.16, t3: 0.28 },
     special:     { t1: 0.06, t2: 0.12, t3: 0.20 },
   },
-  // 结算掉落:按难度决定掉落概率 + 档位权重(权重会按总和归一化,不需要凑成1)
-  gearDrop: {
-    easy:   { chance: 0.20, weights: { t1: 1,   t2: 0,   t3: 0 } },
-    normal: { chance: 0.28, weights: { t1: 0.7, t2: 0.3, t3: 0 } },
-    hard:   { chance: 0.38, weights: { t1: 0.4, t2: 0.4, t3: 0.2 } },
-  },
+  // RG6:掉落经济重做——不再分难度,固定概率:精良(t2)任何关卡结算都可能掉(75%);魂魄(t3)只有 BOSS 关卡才会额外
+  //   判定一次(50%),和精良的判定各自独立、互不排斥,BOSS 关卡因此可能同一次结算里精良/魂魄双出。
+  gearDrop: { fineChance: 0.75, soulChance: 0.50 },
+  // RG7:重铸——3件同品质装备合成1件,新品质"≥当前品质"随机(判定失败=原品质,成功=+1品质,已是最高品质必定判定为失败);
+  //   3件槽位也相同则结果保底同槽位,否则结果槽位从8槽位里随机抽一个。
+  gearReforge: { successChance: 0.5 },
+  // RG9:装备词条重做——每件装备是独立"掉落实例"(不再是"槽位+品阶"就能唯一确定的固定值):
+  //   主属性:类型固定为这件装备槽位本身对应的属性,数值降到 gearValues 原表的 mainMult,再在 [mainMin,mainMax] 区间内浮动;
+  //   副属性:3条,每条独立随机抽一个槽位类型(8选1,允许和主属性/其它副属性重复,"完全任意"),数值是"那个类型在这件
+  //   装备品阶下的原表数值"的 subMult 左右,同样在 [subMin,subMax] 区间内浮动。三条副属性让"同槽位同品质"的两件装备
+  //   也可能长得完全不一样,这也是为什么装备仓库要把每一件都单独摆出来,不能再按"槽位+品阶"合并计数。
+  gearRoll: { mainMult: 0.6, mainMin: 0.85, mainMax: 1.15, subCount: 3, subMult: 0.20, subMin: 0.8, subMax: 1.2 },
+  // RG11:词条评级——按"这条属性的数值落在它理论区间([min,max])里的百分位"分档,越靠近区间上限评级越高。
+  //   7档从低到高:C/B/A/S/SS/SSS/ACE,min 是该档的百分位门槛(闭区间,>=min 即达标),按数组倒序找第一个满足的。
+  gearRatingTiers: [
+    { key: "C",   min: 0.00, color: "#9aa5b1" },
+    { key: "B",   min: 0.16, color: "#51cf66" },
+    { key: "A",   min: 0.34, color: "#4dabf7" },
+    { key: "S",   min: 0.54, color: "#cc5de8" },
+    { key: "SS",  min: 0.74, color: "#ff922b" },
+    { key: "SSS", min: 0.90, color: "#ff6b6b" },
+    { key: "ACE", min: 0.98, color: "#ffd43b" },
+  ],
 
   // 难度档:dmgMult 敌方伤害倍率 / fireMult 敌方射击间隔倍率(>1 更慢=更易)
   //          bossHpMult BOSS 血量倍率 / invuln 玩家受击无敌时长 / startBombs 初始炸弹

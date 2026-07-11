@@ -148,10 +148,42 @@ const SETTINGS_DEFAULTS = {
 const Settings = {
   key: "kzts_settings",
   // JJ:音效/音乐拆成独立音量+独立开关(原来共用一个 volume,音乐音效没法分别调)
-  data: Object.assign({}, SETTINGS_DEFAULTS, { gearOwned: [], gearLoadout: {} }),
+  data: Object.assign({}, SETTINGS_DEFAULTS, { gearInventory: [], gearLoadout: {} }),
+  // RG9:老存档的机装是"槽位+品阶"固定值模型(itemKey 数组或数量映射,没有独立实例),迁移到"每件独立随机实例"模型——
+  //   按老档记录的件数重新掉率式地各roll一份全新实例(旧的固定数值本来就要被这次改版淘汰,不强求数值对得上,
+  //   只保证换代后玩家手上的装备数量/装备中的槽位不丢);t1(制式)老物品统一按 t2(精良)品阶重roll,
+  //   这也顺带修掉了"CONFIG.gearTiers 里已经没有 t1 会导致图鉴机装页崩溃"的根因。在 normalize() 校验之前跑,
+  //   这样迁移出来的 gearInventory/gearLoadout 能直接过 normalize() 的合法性检查。
+  migrateLegacyGear(src) {
+    if (src.gearOwned == null || typeof game === "undefined" || !game.gearRollInstance) return;
+    if (!Array.isArray(src.gearInventory)) src.gearInventory = [];
+    const upT1 = (t) => t === "t1" ? "t2" : t;
+    const counts = Array.isArray(src.gearOwned)
+      ? src.gearOwned.reduce((m, k) => { m[k] = (m[k] || 0) + 1; return m; }, {})
+      : src.gearOwned;
+    const bySlotTier = {};   // 记住每个"槽位+品阶"最后 roll 出来的一个实例 id,给下面重映射 gearLoadout 用
+    for (const [itemKey, n] of Object.entries(counts || {})) {
+      const [slotKey, tierRaw] = String(itemKey).split("_"); const tierKey = upT1(tierRaw);
+      if (!CONFIG.gearSlots.some(s => s.key === slotKey)) continue;
+      for (let i = 0; i < n; i++) {
+        const inst = game.gearRollInstance(slotKey, tierKey);
+        src.gearInventory.push(inst);
+        bySlotTier[slotKey + "_" + tierKey] = inst.id;
+      }
+    }
+    const newLoadout = {};
+    for (const [slotKey, oldItemKey] of Object.entries(src.gearLoadout || {})) {
+      if (!oldItemKey || typeof oldItemKey !== "string") continue;
+      const [sk, tierRaw] = oldItemKey.split("_"); const tierKey = upT1(tierRaw);
+      newLoadout[slotKey] = bySlotTier[sk + "_" + tierKey] || null;
+    }
+    src.gearLoadout = newLoadout;
+    delete src.gearOwned;
+  },
   // localStorage 和导入存档都属于不可信边界：旧版本枚举、手工修改或局部损坏不能把地图/机装页带崩。
   normalize(raw) {
     const src = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+    this.migrateLegacyGear(src);
     const bool = (key) => typeof src[key] === "boolean" ? src[key] : SETTINGS_DEFAULTS[key];
     const number = (value, fallback, lo, hi) => {
       const n = value == null ? NaN : Number(value);
@@ -161,22 +193,20 @@ const Settings = {
     const legacyVolume = src.volume;
     const slots = (CONFIG && CONFIG.gearSlots) || [], tiers = (CONFIG && CONFIG.gearTiers) || [];
     const slotKeys = new Set(slots.map(s => s.key)), tierKeys = new Set(tiers.map(t => t.key));
-    const validGear = (item, slotKey = null) => {
-      if (typeof item !== "string") return false;
-      const p = item.split("_");
-      return p.length === 2 && slotKeys.has(p[0]) && tierKeys.has(p[1]) && (!slotKey || p[0] === slotKey);
-    };
-    const gearOwned = Array.isArray(src.gearOwned)
-      ? Array.from(new Set(src.gearOwned.filter(item => validGear(item))))
-      : [];
+    // RG9:装备实例的合法性——每件要有合法槽位/品阶/数字主属性,以及恰好3条合法副属性(类型8选1允许重复,数值是数字)
+    const validInstance = (item) => item && typeof item === "object"
+      && typeof item.id === "string" && slotKeys.has(item.slot) && tierKeys.has(item.tier) && Number.isFinite(item.main)
+      && Array.isArray(item.subs) && item.subs.length === 3
+      && item.subs.every(s => s && slotKeys.has(s.stat) && Number.isFinite(s.value));
+    const gearInventory = Array.isArray(src.gearInventory) ? src.gearInventory.filter(validInstance) : [];
+    const gearIds = new Set(gearInventory.map(i => i.id));
     const gearLoadout = {};
     if (src.gearLoadout && typeof src.gearLoadout === "object" && !Array.isArray(src.gearLoadout)) {
       for (const slot of slots) {
-        const item = src.gearLoadout[slot.key];
-        if (validGear(item, slot.key) && gearOwned.includes(item)) gearLoadout[slot.key] = item;
+        const id = src.gearLoadout[slot.key];
+        if (typeof id === "string" && gearIds.has(id)) gearLoadout[slot.key] = id;
       }
     }
-    const fullStarterSet = slots.every(slot => gearOwned.includes(slot.key + "_t1"));
     return {
       sfxVolume: number(src.sfxVolume != null ? src.sfxVolume : legacyVolume, SETTINGS_DEFAULTS.sfxVolume, 0, 1),
       musicVolume: number(src.musicVolume != null ? src.musicVolume : legacyVolume, SETTINGS_DEFAULTS.musicVolume, 0, 1),
@@ -189,8 +219,8 @@ const Settings = {
       controlMode: src.controlMode === "joystick" || src.controlMode === "drag" ? src.controlMode : SETTINGS_DEFAULTS.controlMode,
       mpSide: src.mpSide === "left" || src.mpSide === "right" ? src.mpSide : SETTINGS_DEFAULTS.mpSide,
       mpTop: number(src.mpTop, SETTINGS_DEFAULTS.mpTop, 3, 92),
-      gearOwned, gearLoadout,
-      gearStarterGranted: src.gearStarterGranted === true && fullStarterSet,
+      gearInventory, gearLoadout,
+      gearStarterGranted: src.gearStarterGranted === true && gearInventory.length > 0,
     };
   },
   load() {

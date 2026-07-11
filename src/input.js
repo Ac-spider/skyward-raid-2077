@@ -41,6 +41,7 @@ function cancelUiGesture() {
   if (game._shipDragging) game.beginShipSnap(Math.round(game._shipScroll));
   game._shipDragging = false; game._codexDragging = false; game._tutorialDragging = false;
   game._mapDragging = false; game._codexUpgradeDragging = false;
+  game.equipDetailPointerUp();
 }
 function startRelativeDrag(px, py) {
   const p = game.player || input;
@@ -62,7 +63,11 @@ canvas.addEventListener("pointerdown", (e) => {
   const p = toLogic(e.clientX, e.clientY);
   if (input.uiPointerId != null && e.pointerId !== input.uiPointerId) return;
   // RG3:机装掉落弹窗盖在最上层,拦在所有状态分支最前面——点哪都先关弹窗,不会误触到弹窗底下结算页的"点击返回地图"
-  if (game._gearDropPopupOpen) { game._gearDropPopupOpen = false; return; }
+  // RG7:BOSS关卡可能精良+魂魄双出——队列里还有下一件就先展示下一件,队列空了才真正关闭弹窗
+  if (game._gearDropPopupOpen) {
+    if (game._gearDropQueue.length) { game._gearDrop = game._gearDropQueue.shift(); } else { game._gearDropPopupOpen = false; }
+    return;
+  }
   if (game.state === "title") {
     if (game.titleSettingsHit(p.x, p.y)) { game._resetArmed = false; game._settingsReturnState = "title"; game.state = "settings"; return; }
     if (game.titleCodexHit(p.x, p.y)) { game.toCodex(); return; }
@@ -88,8 +93,8 @@ canvas.addEventListener("pointerdown", (e) => {
     return;
   }
   if (game.state === "settings") { game.settingsPointerDown(p.x, p.y); if (game._sliderDrag) captureUiPointer(e); return; }
-  if (game.state === "shipselect") { game.shipSelectPointerDown(p.x, p.y); if (game._shipDragging) captureUiPointer(e); return; }
-  if (game.state === "codex") { game.codexPointerDown(p.x, p.y); if (game._codexDragging || game._codexUpgradeDragging) captureUiPointer(e); return; }
+  if (game.state === "shipselect") { game.shipSelectPointerDown(p.x, p.y); if (game._shipDragging || game._equipDetailDragging) captureUiPointer(e); return; }
+  if (game.state === "codex") { game.codexPointerDown(p.x, p.y); if (game._codexDragging || game._codexUpgradeDragging || game._equipDetailDragging) captureUiPointer(e); return; }
   if (game.state === "tutorial") { game.tutorialPointerDown(p.x, p.y); if (game._tutorialDragging) captureUiPointer(e); return; }
   if (game.state === "map") { game.mapPointerDown(p.x, p.y); if (game._mapDragging) captureUiPointer(e); return; }
   if (game.state === "chipselect") {
@@ -138,6 +143,7 @@ canvas.addEventListener("pointermove", (e) => {
   if (game.state === "settings" && game._sliderDrag === "music") { if (e.pointerId !== input.uiPointerId) return; game.setMusicVolumeFromX(p.x); return; }
   if (game.state === "map" && game._mapDragging) { if (e.pointerId !== input.uiPointerId) return; game.mapPointerMove(p.x, p.y); return; }
   if (game.state === "codex" && game._codexUpgradeDragging) { if (e.pointerId !== input.uiPointerId) return; game.codexUpgradePointerMove(p.y); return; }
+  if (game._equipPickerSlot && game._equipDetailDragging) { if (e.pointerId !== input.uiPointerId) return; game.equipDetailPointerMove(p.y); return; }
   if (game.state === "shipselect" && game._shipDragging) { if (e.pointerId !== input.uiPointerId) return; game.shipSelectPointerMove(p.x); return; }
   // YY:忽略非移动手指发来的坐标——否则点技能/炸弹/暂停按钮的那根手指稍微一动就会把飞机的移动目标改成按钮位置
   if (e.pointerId !== input.movePointerId) return;
@@ -162,6 +168,7 @@ canvas.addEventListener("pointerup", (e) => {
     if (game.state === "codex" && game._codexDragging) { const p = toLogic(e.clientX, e.clientY); game.codexSwipe(p.x); }
     if (game.state === "tutorial" && game._tutorialDragging) { const p = toLogic(e.clientX, e.clientY); game.tutorialSwipe(p.x); }
     if (game.state === "map" && game._mapDragging) { const p = toLogic(e.clientX, e.clientY); game.mapPointerUp(p.x, p.y); }
+    game.equipDetailPointerUp();
     game._shipDragging = false; game._codexDragging = false; game._tutorialDragging = false; game._mapDragging = false; game._codexUpgradeDragging = false;
     releaseUiPointer(e.pointerId);
   }
@@ -169,6 +176,7 @@ canvas.addEventListener("pointerup", (e) => {
 canvas.addEventListener("pointercancel", (e) => {
   if (e.pointerId === input.chargePointerId) { game.releaseCharge(); input.chargePointerId = null; }
   if (e.pointerId === input.movePointerId) { input.dragging = false; resetJoystick(); input.movePointerId = null; }
+  game.equipDetailPointerUp();
   if (e.pointerId === input.uiPointerId) { cancelUiGesture(); releaseUiPointer(e.pointerId); }
 });
 canvas.addEventListener("lostpointercapture", (e) => {
@@ -183,6 +191,9 @@ canvas.addEventListener("wheel", (e) => {
   if (game.state === "codex" && game._codexTab === "upgrade") { game._codexUpgradeScrollY = clamp(game._codexUpgradeScrollY + dy, 0, game.codexUpgradeMaxScroll()); e.preventDefault(); return; }
 }, { passive: false });
 window.addEventListener("keydown", (e) => {
+  // RG10:游戏内 DOM 输入框(比如兑换码弹窗)聚焦时,不能让这套全局快捷键吞掉 B/X/C/P/M 等字母键的正常输入——
+  //   之前不分场景一律 preventDefault(),输入框里打这几个字母会被拦截打不出来。
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
   Sound.resume(); Music.resume(true);
   if (game.state === "endlessdiff" && e.key === "Escape") { game.toTitle(); e.preventDefault(); return; }
   if (game.state === "chipselect" && ["1", "2", "3"].includes(e.key)) { game.chooseChip(Number(e.key) - 1); e.preventDefault(); return; }
@@ -196,5 +207,6 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "v" || e.key === "V") Settings.set("haptics", !Settings.data.haptics);
 });
 window.addEventListener("keyup", (e) => {
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
   if (e.key === "c" || e.key === "C") { game.releaseCharge(); e.preventDefault(); }
 });
