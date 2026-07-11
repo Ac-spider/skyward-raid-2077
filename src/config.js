@@ -496,6 +496,44 @@ const CONFIG = {
     { key: "ACE", min: 0.98, color: "#ffd43b" },
   ],
 
+  // RG13:经济系统(商店/体力/扫荡/词条刷新石)——首版数值,先用简单的整数方便后续按实际游玩节奏调整。
+  //   晶石(crystals)是关卡结算/扫荡的常规货币;金币(gold)是第二种货币,这一版还没有获取途径(先建好数据/商店骨架)。
+  //   体力用真实时间回复(staminaUpdatedAt 记上次结算的时间戳,懒计算,不需要常驻计时器);
+  //   体力不足不再硬拦关卡入口——可以照常进,只是本关结算不发晶石/机装奖励(扫荡不涉及"进战斗",仍然硬拦)。
+  economy: {
+    crystalBase: 15, crystalPerWorld: 3, crystalBossMult: 1.5,
+    staminaMax: 100, staminaRegenMinutes: 4, staminaCostLevel: 8, staminaCostSweep: 8,
+  },
+  // RG14:商店按货币分两个货架——晶石商店4种词条石,金币商店目前只有体力补给包(后续再慢慢上架)。
+  //   每件都标 currency 供 game.shopBuy() 判断扣哪种货币。
+  shopBatchSize: 5,   // "批量购买"一次最多买几件(实际会按余额封顶,买不够5件就买能买得起的数量)
+  // RG14:货架至少留够 4列×3行=12 个槽位(商店页要求"没有商品的地方显示为空槽"),这里的数组长度不用凑够12——
+  //   不足的由 UI 补空槽,后续往这两个数组里加新条目就会自动填进空位,不用改布局代码。
+  shopItems: {
+    crystal: [
+      { key: "rerollStone", kind: "stone", stoneKey: "reroll", price: 40, currency: "crystals", name: "刷新石", desc: "随机刷新所选装备的3条副属性数值(锁定的不受影响)", color: "#4dabf7" },
+      { key: "lockStone", kind: "stone", stoneKey: "lock", price: 30, currency: "crystals", name: "锁定石", desc: "锁定一条未锁定的副属性,锁定后刷新石不会改动它", color: "#ffd43b" },
+      { key: "unlockStone", kind: "stone", stoneKey: "unlock", price: 30, currency: "crystals", name: "解锁石", desc: "解锁一条已锁定的副属性", color: "#74c0fc" },
+      { key: "growthStone", kind: "stone", stoneKey: "growth", price: 500, currency: "crystals", name: "祈福石", desc: "让所选装备的3条副属性数值全部提升一截", color: "#51cf66" },
+    ],
+    gold: [
+      { key: "stamina30", kind: "stamina", amount: 30, price: 1, currency: "gold", name: "体力补给包", desc: "立即恢复30点体力", color: "#38d9a9" },
+    ],
+  },
+  gearStoneDefs: {
+    reroll: { name: "刷新石", color: "#4dabf7", desc: "随机刷新这件装备所有未锁定副属性的数值(类型不变,数值在原区间内重新抽)" },
+    lock:   { name: "锁定石", color: "#ffd43b", desc: "选中后点一条未锁定的副属性的锁形图标,把它锁定(锁定后刷新石不会碰它)" },
+    unlock: { name: "解锁石", color: "#74c0fc", desc: "选中后点一条已锁定的副属性的锁形图标,把它解锁" },
+    growth: { name: "祈福石", color: "#51cf66", desc: "让这件装备所有副属性数值一律朝区间上限推进一截" },
+  },
+  // RG14:兑换码——键统一小写(redeemGearCode 会先转小写再查表),命中即按 grant 的字段发放对应货币/数量,
+  //   都不限制"只能领一次"(和已有的 iclaude 一样可重复兑换)
+  redeemCodes: {
+    iclaude: { kind: "gearSet", tier: "t3" },   // 一整套魂能装备
+    icodex: { kind: "crystals", amount: 1000 },
+    clodex: { kind: "gold", amount: 10 },
+  },
+
   // 难度档:dmgMult 敌方伤害倍率 / fireMult 敌方射击间隔倍率(>1 更慢=更易)
   //          bossHpMult BOSS 血量倍率 / invuln 玩家受击无敌时长 / startBombs 初始炸弹
   // X3:itemDropMult(仅 BOSS 关卡的自动掉落间隔倍率,>1 更慢更稀有)/ preBossMobMult(标了 preBoss:true 的波次数量倍率)
