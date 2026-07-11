@@ -190,10 +190,11 @@ const game = {
   // RG13:词条石——不再点了立刻生效,改成"先选中(3个方槽,和商店同一套视觉)→下方出描述→确认使用才真正操作"。
   //   锁定石比较特殊,它的"操作对象"是某一条具体的副属性,选中锁定石后副属性行的锁图标才会变成可点的目标,
   //   点哪条就对哪条生效(那一下点击本身就是确认,不需要再多一次"确认使用")。
-  equipStoneKeys() { return ["reroll", "lock", "growth"]; },
+  // RG14:新增解锁石后是4种词条石,4个方槽单行排(比3槽版本更窄一些,字号跟着缩小,详见 drawEquipPicker)
+  equipStoneKeys() { return ["reroll", "lock", "unlock", "growth"]; },
   equipStoneSlotRect(i) {
-    const pane = this.equipDetailPaneRect(), y = this.equipDetailStoneRowY(), slotW = (pane.w - 16) / 3;
-    return { x: pane.x + i * (slotW + 8), y, w: slotW, h: 56 };
+    const pane = this.equipDetailPaneRect(), y = this.equipDetailStoneRowY(), gap = 6, slotW = (pane.w - gap * 3) / 4;
+    return { x: pane.x + i * (slotW + gap), y, w: slotW, h: 56 };
   },
   equipStoneDescRect() { const pane = this.equipDetailPaneRect(), y = this.equipDetailStoneRowY(); return { x: pane.x, y: y + 64, w: pane.w, h: 44 }; },
   equipStoneConfirmRect() { const d = this.equipStoneDescRect(); return { x: d.x, y: d.y + d.h + 4, w: d.w, h: 36 }; },
@@ -224,14 +225,23 @@ const game = {
         return;
       }
       if (this._gearStoneSel === "growth" && inR(this.equipStoneConfirmRect())) {
-        this._gearStoneMsg = this.gearApplyGrowth(selInst.id) ? "副属性数值已提升" : "增长石不足";
+        this._gearStoneMsg = this.gearApplyGrowth(selInst.id) ? "副属性数值已提升" : "祈福石不足";
         this._gearStoneSel = null;
         return;
       }
       if (this._gearStoneSel === "lock") {
         for (let si = 0; si < selInst.subs.length; si++) {
           if (inR(this.equipDetailSubLockRect(si))) {
-            this._gearStoneMsg = this.gearToggleSubLock(selInst.id, si) ? (selInst.subs[si].locked ? "已锁定" : "已解锁") : "锁定石不足";
+            this._gearStoneMsg = this.gearLockSub(selInst.id, si) ? "已锁定" : (selInst.subs[si].locked ? "这条已经是锁定状态" : "锁定石不足");
+            this._gearStoneSel = null;
+            return;
+          }
+        }
+      }
+      if (this._gearStoneSel === "unlock") {
+        for (let si = 0; si < selInst.subs.length; si++) {
+          if (inR(this.equipDetailSubLockRect(si))) {
+            this._gearStoneMsg = this.gearUnlockSub(selInst.id, si) ? "已解锁" : (!selInst.subs[si].locked ? "这条本来就没锁定" : "解锁石不足");
             this._gearStoneSel = null;
             return;
           }
@@ -1153,11 +1163,19 @@ const game = {
     Settings.save();
     return true;
   },
-  // RG12:锁定石——切换某条副属性的锁定态(锁定后 gearApplyReroll 会跳过它),消耗1件不分锁定/解锁方向。
-  gearToggleSubLock(instanceId, subIdx) {
-    const inst = this.gearInstanceById(instanceId); if (!inst || !inst.subs[subIdx]) return false;
+  // RG14:锁定石/解锁石拆成两个独立方向——锁定石只能锁未锁定的一条,解锁石只能解已锁定的一条,
+  //   对象状态不对(比如拿锁定石去点一条已经锁定的)直接失败不扣石头。
+  gearLockSub(instanceId, subIdx) {
+    const inst = this.gearInstanceById(instanceId); if (!inst || !inst.subs[subIdx] || inst.subs[subIdx].locked) return false;
     if (!this.gearStoneConsume("lock", 1)) return false;
-    inst.subs[subIdx].locked = !inst.subs[subIdx].locked;
+    inst.subs[subIdx].locked = true;
+    Settings.save();
+    return true;
+  },
+  gearUnlockSub(instanceId, subIdx) {
+    const inst = this.gearInstanceById(instanceId); if (!inst || !inst.subs[subIdx] || !inst.subs[subIdx].locked) return false;
+    if (!this.gearStoneConsume("unlock", 1)) return false;
+    inst.subs[subIdx].locked = false;
     Settings.save();
     return true;
   },
@@ -1371,18 +1389,20 @@ const game = {
     for (const s of CONFIG.gearSlots) this.gearAward(s.key, "t3");
     Settings.set("gearStarterGranted", true);
   },
-  // RG9:兑换码——由游戏内的"兑换码"页面调用(见 drawRedeemCode),不再用浏览器 window.prompt;不区分大小写/
-  //   首尾空格;命中 "iclaude" 直接发一整套魂能(t3)装备,不做"只能领一次"的限制(用户明确要求可重复获取),
-  //   每次都是全新 roll 的8件,拿来囤重铸材料也说得通。返回是否兑换成功,调用方(UI)自己决定怎么提示。
+  // RG14:兑换码——由游戏内的"兑换码"页面调用(见 RedeemUI),不再用浏览器 window.prompt;不区分大小写/首尾空格;
+  //   命中表按 kind 发放(装备全套 / 晶石 / 金币),都不限制"只能领一次"(用户明确要求可重复获取)。
+  //   返回是否兑换成功,调用方(UI)自己决定怎么提示。
   redeemGearCode(raw) {
     const code = (raw || "").trim().toLowerCase();
     if (!code) return false;
-    if (code === "iclaude") {
-      for (const s of CONFIG.gearSlots) this.gearAward(s.key, "t3");
-      Sound.powerup(); Haptics.powerup();
-      return true;
-    }
-    return false;
+    const grant = CONFIG.redeemCodes[code];
+    if (!grant) return false;
+    if (grant.kind === "gearSet") { for (const s of CONFIG.gearSlots) this.gearAward(s.key, grant.tier); }
+    else if (grant.kind === "crystals") this.crystalsAward(grant.amount);
+    else if (grant.kind === "gold") this.goldAward(grant.amount);
+    else return false;
+    Sound.powerup(); Haptics.powerup();
+    return true;
   },
   // RG9:某槽位仓库里的全部实例,按品阶从高到低、同品阶内主属性从高到低排序——最好的装备排最前面,
   //   仓库/装备弹窗数量多的时候玩家一眼就能看到"我这个槽位最强的是哪件"
@@ -3592,23 +3612,34 @@ const game = {
     ctx.fillStyle = o.color || "#fff"; ctx.font = "bold " + (o.font || 30) + "px 'Segoe UI', sans-serif";
     ctx.fillText(o.fallback, cx, cy + (o.fallbackBaselineAdj != null ? o.fallbackBaselineAdj : 10));
   },
-  drawTitleSmallButton(ctx, r, iconKey, fallbackLabel, text) {
+  drawTitleSmallButton(ctx, r, iconKey, fallbackLabel, text, color = "#adb5bd") {
     const icon = ImageAssets.title("icon-" + iconKey);
-    UI.button(ctx, r, { label: icon ? text : fallbackLabel, color: "#adb5bd", font: 15, radius: 10 });
+    UI.button(ctx, r, { label: icon ? text : fallbackLabel, color, font: 15, radius: 10 });
     if (icon) ImageAssets.draw(ctx, icon, r.x + 21, r.y + r.h / 2, 20);
   },
-  // RG13:折叠菜单——收起态只有一个 ☰ 图标;展开态在它正下方叠一块半透明面板,里面竖排4个小按钮(图鉴/帮助/设置/商店)
+  // RG14:每个菜单项各自一个强调色(风格统一都走玻璃按钮,颜色区分开更好认),drawTitleMenu 展开面板/按钮都按这个取色
+  titleMenuItemColors() { return { codex: "#4dabf7", help: "#38d9a9", settings: "#adb5bd", shop: "#cc5de8" }; },
+  // RG13:折叠菜单——收起态只有一个 ☰ 图标;展开态在它正下方叠一块透明玻璃面板,里面竖排4个小按钮(图鉴/帮助/设置/商店)
+  // RG14:面板改成真正的"玻璃"质感——不再垫近乎不透明的黑底,改用和 UI.panel 同一路的渐变+高光+描边,
+  //   半透明到能隐约看见背后的开屏插画,和其它玻璃按钮(UI.button 的非 active 态)风格统一。
   drawTitleMenu(ctx) {
     const t = this.titleMenuToggleRect();
     UI.button(ctx, t, { label: this._titleMenuOpen ? "✕" : "☰", color: this._titleMenuOpen ? "#ff922b" : "#adb5bd", active: this._titleMenuOpen, font: 20, radius: 12 });
     if (!this._titleMenuOpen) return;
     const panel = this.titleMenuPanelRect();
-    UI.roundRect(ctx, panel.x, panel.y, panel.w, panel.h, 14); ctx.fillStyle = "rgba(8,12,20,.9)"; ctx.fill();
-    UI.panel(ctx, panel.x, panel.y, panel.w, panel.h, 14, { stroke: "rgba(255,255,255,.2)" });
-    this.titleMenuItemDefs().forEach(([key, fallbackLabel, text], i) => this.drawTitleSmallButton(ctx, this.titleMenuItemRect(i), key, fallbackLabel, text));
+    ctx.save(); ctx.shadowColor = "rgba(0,0,0,.35)"; ctx.shadowBlur = 18; ctx.shadowOffsetY = 6;
+    const g = ctx.createLinearGradient(0, panel.y, 0, panel.y + panel.h);
+    g.addColorStop(0, "rgba(255,255,255,.12)"); g.addColorStop(0.4, "rgba(20,28,42,.42)"); g.addColorStop(1, "rgba(8,12,20,.58)");
+    UI.roundRect(ctx, panel.x, panel.y, panel.w, panel.h, 14); ctx.fillStyle = g; ctx.fill();
+    ctx.restore();
+    UI.panel(ctx, panel.x, panel.y, panel.w, panel.h, 14, { top: "rgba(255,255,255,.1)", bottom: "rgba(255,255,255,.02)", stroke: "rgba(255,255,255,.25)" });
+    const colors = this.titleMenuItemColors();
+    this.titleMenuItemDefs().forEach(([key, fallbackLabel, text], i) => this.drawTitleSmallButton(ctx, this.titleMenuItemRect(i), key, fallbackLabel, text, colors[key]));
   },
-  // RG13:体力/晶石/金币资源条——简化占位图标(闪电/菱形/圆币),等确认好显示效果再考虑要不要换真贴图
+  // RG14:体力/晶石/金币资源条——实图优先(ImageAssets.economy),没加载完时退回简化占位图标(闪电/菱形/圆币)
   drawEconomyIcon(ctx, x, y, r, kind, color) {
+    const img = ImageAssets.economy(kind);
+    if (img && ImageAssets.draw(ctx, img, x, y, r * 2.4)) return;
     ctx.save(); ctx.translate(x, y); ctx.strokeStyle = color; ctx.fillStyle = UI.rgba(color, .3); ctx.lineWidth = 2;
     if (kind === "stamina") {
       ctx.beginPath(); ctx.moveTo(-r * 0.15, -r); ctx.lineTo(-r * 0.55, r * 0.15); ctx.lineTo(-r * 0.05, r * 0.15); ctx.lineTo(-r * 0.35, r); ctx.lineTo(r * 0.55, -r * 0.1); ctx.lineTo(r * 0.05, -r * 0.1); ctx.closePath();
@@ -4012,18 +4043,21 @@ const game = {
       let y = pane.y + 76;
       ctx.fillStyle = "#868e96"; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillText("主属性", pane.x, y); y += 20;
       this.drawGearStatRow(ctx, pane.x, y, pane.w, rg.main, true); y += 30;
-      const lockMode = this._gearStoneSel === "lock";
+      // RG14:选中锁定石时高亮"可以锁"的(未锁定)那些图标,选中解锁石时高亮"可以解"的(已锁定)那些——
+      //   两种选中态用各自石头的主题色提示,不是同一种蓝
+      const lockMode = this._gearStoneSel === "lock", unlockMode = this._gearStoneSel === "unlock";
+      const pickColor = lockMode ? "#ffd43b" : (unlockMode ? "#74c0fc" : null);
       ctx.fillStyle = "#868e96"; ctx.font = "11px 'Segoe UI', sans-serif";
-      ctx.fillText(lockMode ? "副属性(选中锁定石,点图标锁定/解锁)" : "副属性", pane.x, y); y += 20;
-      // RG13:每条副属性左侧一个小锁图标——只有选中了锁定石才能点(平时只是状态展示,防止误触浪费石头)
+      ctx.fillText(lockMode ? "副属性(点未锁定的图标进行锁定)" : unlockMode ? "副属性(点已锁定的图标进行解锁)" : "副属性", pane.x, y); y += 20;
+      // RG13:每条副属性左侧一个小锁图标——只有选中了锁定/解锁石才能点对应状态的目标(平时只是状态展示,防止误触浪费石头)
       rg.subs.forEach((s, si) => {
         const lockRect = this.equipDetailSubLockRect(si), locked = !!selInst.subs[si].locked;
         const lcx = lockRect.x + lockRect.w / 2, lcy = lockRect.y + lockRect.h / 2 + 2;
+        const isTarget = (lockMode && !locked) || (unlockMode && locked);
         ctx.save();
-        const lockColor = locked ? "#ffd43b" : (lockMode ? "#4dabf7" : "rgba(255,255,255,.4)");
-        ctx.strokeStyle = lockColor; ctx.lineWidth = 1.6;
-        ctx.fillStyle = locked ? UI.rgba("#ffd43b", .3) : (lockMode ? UI.rgba("#4dabf7", .2) : "rgba(255,255,255,.06)");
-        if (lockMode) { const pulse = 0.5 + Math.sin(this.titleT * 5) * 0.5; ctx.shadowColor = "#4dabf7"; ctx.shadowBlur = 4 + pulse * 4; }
+        ctx.strokeStyle = locked ? "#ffd43b" : (isTarget ? pickColor : "rgba(255,255,255,.4)"); ctx.lineWidth = 1.6;
+        ctx.fillStyle = locked ? UI.rgba("#ffd43b", .3) : (isTarget ? UI.rgba(pickColor, .2) : "rgba(255,255,255,.06)");
+        if (isTarget) { const pulse = 0.5 + Math.sin(this.titleT * 5) * 0.5; ctx.shadowColor = pickColor; ctx.shadowBlur = 4 + pulse * 4; }
         UI.roundRect(ctx, lcx - 6, lcy - 5, 12, 9, 2); ctx.fill(); ctx.stroke();
         ctx.beginPath(); ctx.arc(lcx, lcy - 5, 4, Math.PI, 0); ctx.stroke();
         ctx.restore();
@@ -4044,7 +4078,7 @@ const game = {
         const def = CONFIG.gearStoneDefs[this._gearStoneSel];
         ctx.fillStyle = def.color; ctx.font = "11px 'Segoe UI', sans-serif";
         UI.wrapText(ctx, def.desc, descR.w, 2).forEach((line, li) => ctx.fillText(line, descR.x, descR.y + 14 + li * 16));
-        if (this._gearStoneSel !== "lock") {
+        if (this._gearStoneSel !== "lock" && this._gearStoneSel !== "unlock") {
           const canUse = this.gearStoneCount(this._gearStoneSel) > 0;
           UI.button(ctx, this.equipStoneConfirmRect(), { label: "确认使用", color: def.color, active: canUse, font: 13, radius: 8 });
         }
@@ -4706,26 +4740,37 @@ const game = {
   // RG13:标题/资源条/tab 整体下移让位——资源条挪到标题正下方、tab 再挪到资源条下方,不再叠在一起
   shopTabRect(i) { const w = 140, gap = 12, x0 = CONFIG.WIDTH / 2 - (w * 2 + gap) / 2; return { x: x0 + i * (w + gap), y: 96, w, h: 36 }; },
   shopCurrentList() { return this._shopTab === "gold" ? CONFIG.shopItems.gold : CONFIG.shopItems.crystal; },
-  shopGridRect() { return { x: 20, y: 152, w: CONFIG.WIDTH - 40, h: 156 }; },
-  shopSlotRect(i) {
-    const g = this.shopGridRect(), cols = 3, slotW = 140, gap = (g.w - cols * slotW) / (cols - 1);
-    const col = i % cols, row = Math.floor(i / cols);
-    return { x: g.x + col * (slotW + gap), y: g.y + row * 156, w: slotW, h: 140 };
+  // RG14:货架先摆够 4列×3行=12 个槽位(用户明确要求"每行至少4个、至少3行"),商品数不够12就补空槽,
+  //   后续加新商品自动填进空位,布局代码不用再改。
+  SHOP_GRID_COLS: 4, SHOP_GRID_ROWS: 3,
+  shopGridSlotCount() { return this.SHOP_GRID_COLS * this.SHOP_GRID_ROWS; },
+  shopGridRect() {
+    const cols = this.SHOP_GRID_COLS, rows = this.SHOP_GRID_ROWS, slotW = 117, slotH = 118, gap = 9;
+    const w = cols * slotW + (cols - 1) * gap;
+    return { x: CONFIG.WIDTH / 2 - w / 2, y: 152, w, h: rows * slotH + (rows - 1) * gap, cols, rows, slotW, slotH, gap };
   },
-  shopDetailRect() { const g = this.shopGridRect(); return { x: 20, y: g.y + g.h + 20, w: CONFIG.WIDTH - 40, h: 300 }; },
+  shopSlotRect(i) {
+    const g = this.shopGridRect(), col = i % g.cols, row = Math.floor(i / g.cols);
+    return { x: g.x + col * (g.slotW + g.gap), y: g.y + row * (g.slotH + g.gap), w: g.slotW, h: g.slotH };
+  },
+  shopDetailRect() { const g = this.shopGridRect(); return { x: 20, y: g.y + g.h + 20, w: CONFIG.WIDTH - 40, h: 260 }; },
   shopActionRect(i) {
     const d = this.shopDetailRect(), w = (d.w - 20) / 3, h = 46, y = d.y + d.h - h - 16;
     return { x: d.x + i * (w + 10), y, w, h };
   },
-  // RG12/RG13:占位图标——三种石头分别用菱形/锁形/向上箭头简笔画区分,体力包用一个闪电,和贴图上线前的"简化模型"要求一致
+  // RG14:实图优先——体力补给包/四种词条石都已有正式贴图(ImageAssets.economy/stone),画得出来就直接画;
+  //   贴图还没加载完/加载失败时退回原来的简笔画占位(菱形/锁形/箭头/闪电),不会出现空白图标。
   drawShopIcon(ctx, x, y, r, item) {
+    const img = item.kind === "stamina" ? ImageAssets.economy("stamina-pack")
+      : item.stoneKey ? ImageAssets.stone(item.stoneKey) : null;
+    if (img && ImageAssets.draw(ctx, img, x, y, r * 2.3)) return;
     ctx.save(); ctx.translate(x, y); ctx.strokeStyle = item.color; ctx.fillStyle = UI.rgba(item.color, .25); ctx.lineWidth = 2.5;
     if (item.kind === "stamina") {
       ctx.beginPath(); ctx.moveTo(-r * 0.15, -r); ctx.lineTo(-r * 0.55, r * 0.15); ctx.lineTo(-r * 0.05, r * 0.15); ctx.lineTo(-r * 0.35, r); ctx.lineTo(r * 0.55, -r * 0.1); ctx.lineTo(r * 0.05, -r * 0.1); ctx.closePath();
       ctx.fill(); ctx.stroke();
     } else if (item.stoneKey === "reroll") {
       ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(r, 0); ctx.lineTo(0, r); ctx.lineTo(-r, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
-    } else if (item.stoneKey === "lock") {
+    } else if (item.stoneKey === "lock" || item.stoneKey === "unlock") {
       UI.roundRect(ctx, -r * 0.6, -r * 0.1, r * 1.2, r * 0.9, 4); ctx.fill(); ctx.stroke();
       ctx.beginPath(); ctx.arc(0, -r * 0.25, r * 0.4, Math.PI, 0); ctx.stroke();
     } else if (item.stoneKey === "growth") {
@@ -4744,18 +4789,31 @@ const game = {
     ctx.textAlign = "center";
     UI.button(ctx, this.shopTabRect(0), { label: "晶石商店", color: "#7bdfff", active: this._shopTab !== "gold", font: 14, radius: 10 });
     UI.button(ctx, this.shopTabRect(1), { label: "金币商店", color: "#ffd43b", active: this._shopTab === "gold", font: 14, radius: 10 });
-    // 商品格——方形槽位,图标+名称+价格,选中描边高亮
+    // RG14:商品格固定摆满 4×3=12 个槽位——有商品的正常显示(图标/名称/价格/持有),没有商品的画成空槽虚线框占位
+    //   (预告"这里以后会上新东西"),不响应点击。
     const list = this.shopCurrentList();
-    list.forEach((item, i) => {
-      const r = this.shopSlotRect(i), sel = this._shopSelKey === item.key;
+    for (let i = 0; i < this.shopGridSlotCount(); i++) {
+      const r = this.shopSlotRect(i), item = list[i];
+      if (!item) {
+        ctx.save(); ctx.strokeStyle = "rgba(255,255,255,.15)"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 5]);
+        UI.roundRect(ctx, r.x, r.y, r.w, r.h, 12); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.arc(r.x + r.w / 2, r.y + r.h / 2 - 8, 14, 0, Math.PI * 2); ctx.strokeStyle = "rgba(255,255,255,.18)"; ctx.stroke();
+        ctx.font = "18px 'Segoe UI', sans-serif"; ctx.fillStyle = "rgba(255,255,255,.25)"; ctx.textAlign = "center";
+        ctx.fillText("?", r.x + r.w / 2, r.y + r.h / 2 - 2);
+        ctx.restore();
+        ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,255,255,.22)"; ctx.font = "11px 'Segoe UI', sans-serif";
+        ctx.fillText("敬请期待", r.x + r.w / 2, r.y + r.h / 2 + 24);
+        continue;
+      }
+      const sel = this._shopSelKey === item.key;
       UI.panel(ctx, r.x, r.y, r.w, r.h, 12, { accent: item.color });
       if (sel) { ctx.save(); ctx.strokeStyle = item.color; ctx.lineWidth = 2.5; UI.roundRect(ctx, r.x, r.y, r.w, r.h, 12); ctx.stroke(); ctx.restore(); }
-      this.drawShopIcon(ctx, r.x + r.w / 2, r.y + 44, 26, item);
+      this.drawShopIcon(ctx, r.x + r.w / 2, r.y + 36, 20, item);
       ctx.textAlign = "center";
-      ctx.fillStyle = "#fff"; ctx.font = "bold 14px 'Segoe UI', sans-serif"; ctx.fillText(item.name, r.x + r.w / 2, r.y + 90);
-      ctx.fillStyle = item.color; ctx.font = "12px 'Segoe UI', sans-serif"; ctx.fillText(item.price + (item.currency === "gold" ? " 金币" : " 晶石"), r.x + r.w / 2, r.y + 110);
-      if (item.kind === "stone") { ctx.fillStyle = "#868e96"; ctx.font = "10px 'Segoe UI', sans-serif"; ctx.fillText("持有 ×" + this.gearStoneCount(item.stoneKey), r.x + r.w / 2, r.y + 126); }
-    });
+      ctx.fillStyle = "#fff"; ctx.font = "bold 13px 'Segoe UI', sans-serif"; ctx.fillText(item.name, r.x + r.w / 2, r.y + 76);
+      ctx.fillStyle = item.color; ctx.font = "11px 'Segoe UI', sans-serif"; ctx.fillText(item.price + (item.currency === "gold" ? " 金币" : " 晶石"), r.x + r.w / 2, r.y + 94);
+      if (item.kind === "stone") { ctx.fillStyle = "#868e96"; ctx.font = "9px 'Segoe UI', sans-serif"; ctx.fillText("持有 ×" + this.gearStoneCount(item.stoneKey), r.x + r.w / 2, r.y + 108); }
+    }
     // 下半详情区
     const d = this.shopDetailRect(), sel = this._shopSelKey ? this.shopFindItem(this._shopSelKey) : null;
     UI.panel(ctx, d.x, d.y, d.w, d.h, 14, { stroke: "rgba(255,255,255,.18)" });

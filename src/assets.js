@@ -168,6 +168,8 @@ const ImageAssets = {
     );
     // RG2:机装槽位图标——按用户要求排在飞机机身贴图之后加载(数组顺序即请求优先级,飞机模型看得见摸得着,机装要进机型选择页才用得到)
     if (typeof CONFIG !== "undefined" && CONFIG.gearSlots) for (const s of CONFIG.gearSlots) srcs.push("assets/images/ui/gear/icon-gear-" + s.key + ".png");
+    // RG14:经济资源条(体力/晶石/金币)首页一进来就常驻显示,词条石图标在装备页/商店也很快用到——都算常用层
+    srcs.push(...this.economyIconSrcs, ...this.stoneIconSrcs);
     srcs.push(this.ageRatingSrc);   // GG25:适龄提示图标——常用层,和其余首屏必需素材一起统计进加载进度
     return Array.from(new Set(srcs)).filter(Boolean);
   },
@@ -332,6 +334,22 @@ const ImageAssets = {
   // RG2:机装槽位图标——文件名直接用槽位 key(wing/engine/...),不走 slug(),槽位 key 本身已经是合法文件名字符
   gear(slotKey) { return this.ready("assets/images/ui/gear/icon-gear-" + slotKey + ".png"); },
   uiEvent(key) { return this.ready(this.manifest.event[this.slug(key)]); },
+  // RG14:经济资源图标(体力/晶石/金币/体力补给包)+ 词条石图标(刷新/锁定/解锁/祈福)——固定小图集,和机装图标
+  //   同一套"直接常量路径"处理方式,不走 manifest 树(数量少,没必要建子分类)
+  economyIconSrcs: [
+    "assets/images/ui/economy/icon-economy-stamina.png",
+    "assets/images/ui/economy/icon-economy-crystal.png",
+    "assets/images/ui/economy/icon-economy-gold.png",
+    "assets/images/ui/economy/icon-economy-stamina-pack.png",
+  ],
+  stoneIconSrcs: [
+    "assets/images/ui/stones/icon-stone-reroll.png",
+    "assets/images/ui/stones/icon-stone-lock.png",
+    "assets/images/ui/stones/icon-stone-unlock.png",
+    "assets/images/ui/stones/icon-stone-growth.png",
+  ],
+  economy(key) { return this.ready("assets/images/ui/economy/icon-economy-" + key + ".png"); },
+  stone(key) { return this.ready("assets/images/ui/stones/icon-stone-" + key + ".png"); },
   draw(ctx, img, x, y, size, rotation = 0) {
     if (!img) return false;
     const box = this.bounds(img) || { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight };
